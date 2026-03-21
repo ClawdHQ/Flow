@@ -24,7 +24,8 @@
 
 All dependencies listed in `package.json`. Key packages:
 
-- `@tetherto/wdk-core` — Tether Wallet Development Kit (hackathon requirement)
+- `@tetherto/wdk` — Tether WDK orchestrator — core hackathon requirement
+- `@tetherto/wdk-wallet-evm` — Tether WDK EVM wallet module (Polygon, Arbitrum)
 - `@anthropic-ai/sdk` — Claude API client (also used for OpenRouter via baseURL)
 - `grammy` — Telegram Bot framework
 - `better-sqlite3` — Local database

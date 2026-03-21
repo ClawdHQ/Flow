@@ -127,7 +127,12 @@ export class WalletManager {
       return { txHash: result.hash, success: true };
     } catch {
       // In demo mode (no RPC provider configured), return a mock tx hash
-      return { txHash: '0x' + crypto.randomBytes(32).toString('hex'), success: true };
+      logger.warn(
+        { module: 'wallet', action: 'mock_transfer', to, amount: amount.toString(), chain },
+        '⚠️  DEMO MODE: No live RPC configured — returning mock tx hash. ' +
+        'Set POLYGON_AMOY_RPC_URL and fund the pool wallet for real transactions.'
+      );
+      return { txHash: `0xMOCK_${crypto.randomBytes(4).toString('hex')}`, success: true };
     }
   }
 

@@ -131,7 +131,13 @@ A 3× cap prevents any single creator from receiving more in matching than three
 - A **Telegram bot token** ([@BotFather](https://t.me/BotFather))
 - **An LLM API key**: Either Anthropic (`ANTHROPIC_API_KEY`) OR OpenRouter (`OPENROUTER_API_KEY`)
   — OpenRouter has a free tier and supports Claude models
-- **Tether WDK seed phrase**: Generate with `npx @tetherto/wdk-core generate-seed`
+- **Tether WDK seed phrase** — A 12-word BIP-39 mnemonic. Generate one with Node.js:
+  ```bash
+  node -e "const {ethers}=require('ethers');console.log(ethers.Wallet.createRandom().mnemonic.phrase)"
+  ```
+  Or use any BIP-39 generator (e.g. https://iancoleman.io/bip39/ — use offline only).
+  Set the output as `WDK_SEED_PHRASE` in your `.env`.
+  ⚠️ This controls all wallets including the matching pool. Never commit it.
 - RPC endpoint URLs for at least one supported chain (Polygon Amoy testnet works for demo)
 - A **Web3.Storage token** for IPFS publishing (optional — set `IPFS_DISABLED=true` to skip)
 
@@ -377,6 +383,39 @@ Flow/
 | Matching pool | `m/44'/60'/0'/0/0` |
 | Creator payout (index *n*) | `m/44'/60'/1'/0/n` |
 | Tip escrow (index *n*) | `m/44'/60'/2'/0/n` |
+
+---
+
+---
+
+## Known Limitations
+
+- **Demo mode transfers**: When no live RPC is configured (e.g. during local simulation),
+  `sendUSDT()` returns a deterministic mock transaction hash instead of a real on-chain
+  transaction. All bot messages clearly indicate when demo mode is active. To enable
+  real transfers, configure `POLYGON_AMOY_RPC_URL` and fund the pool wallet with test
+  USDt from [pimlico.io/faucet](https://www.pimlico.io/faucet).
+
+- **TRON support**: TRON creator payout routing is config-present but not yet wired to
+  `@tetherto/wdk-wallet-tron`. Creators selecting TRON as their payout chain will
+  receive funds on Polygon until TRON module integration is complete.
+
+- **IPFS archival**: When `IPFS_DISABLED=true` or no `WEB3_STORAGE_TOKEN` is set,
+  round reports are published with a deterministic mock CID. The signing and
+  attestation logic runs identically — only the actual IPFS upload is skipped.
+
+- **Sybil clustering detection**: The network clustering check (detecting 2-hop shared
+  funding sources) requires an archive RPC node. Standard public testnet RPCs may not
+  support `eth_getTransactionByHash` lookups for older blocks. In this case the
+  clustering check is skipped and only wallet age + velocity checks run.
+
+- **Round frequency**: The default `ROUND_CRON=0 0 * * *` runs rounds daily at midnight.
+  For demo purposes, trigger a manual round with `npm run simulate` which executes
+  the full allocation pipeline without waiting for the cron schedule.
+
+- **Single-process deployment**: The bot, round manager, and pool monitor all run in
+  one Node.js process. For production scale, these should be separated into independent
+  workers with a shared database.
 
 ---
 
