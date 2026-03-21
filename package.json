@@ -15,7 +15,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.37.0",
+    "@tetherto/wdk": "^1.0.0-beta.6",
     "@tetherto/wdk-core": "file:wdk-core",
+    "@tetherto/wdk-wallet-evm": "^1.0.0-beta.10",
     "@web3-storage/w3up-client": "^17.3.0",
     "better-sqlite3": "^11.10.0",
     "dotenv": "^16.4.5",
