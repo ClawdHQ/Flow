@@ -1,5 +1,6 @@
 import express from 'express';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { RoundsRepository } from '../storage/repositories/rounds.js';
 import { TipsRepository } from '../storage/repositories/tips.js';
@@ -17,6 +18,9 @@ const tipsRepo = new TipsRepository();
 const flagsRepo = new SybilFlagsRepository();
 const creatorsRepo = new CreatorsRepository();
 const poolMonitor = new PoolMonitor();
+
+// Read static dashboard HTML once at startup — no dynamic file access per request
+const dashboardHtml = fs.readFileSync(path.join(__dirname, 'index.html'), 'utf8');
 
 const dashRateMap = new Map<string, { count: number; resetAt: number }>();
 
@@ -86,7 +90,8 @@ app.get('/api/rounds', dashRateLimit, (_req, res) => {
 });
 
 app.get('/', dashRateLimit, (_req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
+  res.setHeader('Content-Type', 'text/html');
+  res.send(dashboardHtml);
 });
 
 export function startDashboard(port: number): void {
