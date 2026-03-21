@@ -1,0 +1,280 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FLOW — Quadratic Tipping Dashboard</title>
+  <style>
+    :root {
+      --bg: #0d0d0d;
+      --panel: #111827;
+      --border: #1f2937;
+      --accent: #10b981;
+      --accent2: #6366f1;
+      --warn: #f59e0b;
+      --danger: #ef4444;
+      --text: #e5e7eb;
+      --muted: #6b7280;
+      --font: 'Courier New', Courier, monospace;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      min-height: 100vh;
+    }
+    header {
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { color: var(--accent); font-size: 18px; letter-spacing: 2px; }
+    header .status { color: var(--muted); font-size: 11px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 16px;
+      padding: 20px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 16px;
+    }
+    .panel h2 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 2px;
+      color: var(--muted);
+      margin-bottom: 12px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 8px;
+    }
+    .metric { display: flex; justify-content: space-between; padding: 4px 0; }
+    .metric .label { color: var(--muted); }
+    .metric .value { color: var(--accent); font-weight: bold; }
+    .metric .value.warn { color: var(--warn); }
+    .metric .value.danger { color: var(--danger); }
+    table { width: 100%; border-collapse: collapse; }
+    th { text-align: left; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: 1px; padding: 4px 6px; }
+    td { padding: 5px 6px; border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 7px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-weight: bold;
+      text-transform: uppercase;
+    }
+    .badge.open { background: #065f46; color: #6ee7b7; }
+    .badge.completed { background: #1e3a5f; color: #93c5fd; }
+    .badge.failed { background: #7f1d1d; color: #fca5a5; }
+    .badge.locking, .badge.analyzing, .badge.signing, .badge.executing, .badge.archiving { background: #451a03; color: #fcd34d; }
+    .gauge-bar {
+      background: var(--border);
+      border-radius: 4px;
+      height: 8px;
+      width: 100%;
+      margin-top: 6px;
+      overflow: hidden;
+    }
+    .gauge-fill {
+      height: 100%;
+      border-radius: 4px;
+      background: var(--accent);
+      transition: width 0.5s;
+    }
+    .gauge-fill.warn { background: var(--warn); }
+    .gauge-fill.danger { background: var(--danger); }
+    .score-bar {
+      background: var(--border);
+      border-radius: 2px;
+      height: 6px;
+      flex: 1;
+      margin: 0 8px;
+      overflow: hidden;
+    }
+    .score-fill { height: 100%; background: var(--accent2); border-radius: 2px; }
+    .lb-row { display: flex; align-items: center; padding: 5px 0; border-bottom: 1px solid var(--border); }
+    .lb-rank { width: 22px; color: var(--muted); font-size: 11px; }
+    .lb-name { width: 100px; color: var(--text); }
+    .lb-amount { width: 90px; color: var(--accent); text-align: right; font-size: 11px; }
+    .refresh-bar {
+      text-align: center;
+      padding: 8px;
+      color: var(--muted);
+      font-size: 10px;
+    }
+    #countdown { color: var(--accent2); }
+    .sybil-flag { color: var(--danger); font-size: 11px; }
+    .sybil-clean { color: var(--accent); font-size: 11px; }
+    pre { font-family: var(--font); font-size: 11px; color: var(--muted); white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🌊 FLOW</h1>
+    <div class="status">Quadratic Tipping Agent · <span id="now"></span></div>
+  </header>
+
+  <div class="grid">
+    <!-- Current Round -->
+    <div class="panel">
+      <h2>Current Round</h2>
+      <div id="round-info">Loading...</div>
+    </div>
+
+    <!-- Pool Health -->
+    <div class="panel">
+      <h2>Pool Health</h2>
+      <div id="pool-info">Loading...</div>
+    </div>
+
+    <!-- Leaderboard -->
+    <div class="panel" style="grid-column: span 2">
+      <h2>Leaderboard — Quadratic Scores</h2>
+      <div id="leaderboard">Loading...</div>
+    </div>
+
+    <!-- Sybil Monitor -->
+    <div class="panel">
+      <h2>Sybil Monitor</h2>
+      <div id="sybil-info">Loading...</div>
+    </div>
+
+    <!-- Round History -->
+    <div class="panel">
+      <h2>Round History</h2>
+      <div id="rounds-history">Loading...</div>
+    </div>
+  </div>
+
+  <div class="refresh-bar">Auto-refresh in <span id="countdown">30</span>s</div>
+
+  <script>
+    let countdown = 30;
+
+    function fmt(v) { return v || '—'; }
+    function badge(status) {
+      return `<span class="badge ${status}">${status}</span>`;
+    }
+
+    async function fetchRound() {
+      try {
+        const r = await fetch('/api/round/current').then(x => x.json());
+        const el = document.getElementById('round-info');
+        if (r.error) { el.innerHTML = '<span style="color:var(--muted)">No active round</span>'; return; }
+        el.innerHTML = `
+          <div class="metric"><span class="label">Round #</span><span class="value">${r.round_number}</span></div>
+          <div class="metric"><span class="label">Status</span><span>${badge(r.status)}</span></div>
+          <div class="metric"><span class="label">Multiplier</span><span class="value">${r.matching_multiplier}x</span></div>
+          <div class="metric"><span class="label">Direct Tips</span><span class="value">${r.total_direct_tips} USDT</span></div>
+          <div class="metric"><span class="label">Matched</span><span class="value">${r.total_matched} USDT</span></div>
+          <div class="metric"><span class="label">Tippers</span><span class="value">${r.tipper_count}</span></div>
+          <div class="metric"><span class="label">Creators</span><span class="value">${r.creator_count}</span></div>
+          <div class="metric"><span class="label">Sybil Flags</span><span class="value ${r.sybil_flags_count > 0 ? 'warn' : ''}">${r.sybil_flags_count}</span></div>
+          <div class="metric"><span class="label">Started</span><span class="value" style="font-size:10px">${r.started_at}</span></div>
+        `;
+      } catch(e) { document.getElementById('round-info').innerHTML = '<span style="color:var(--danger)">Error loading round</span>'; }
+    }
+
+    async function fetchPool() {
+      try {
+        const p = await fetch('/api/pool').then(x => x.json());
+        const bal = parseFloat(p.balance);
+        const fillPct = Math.min(100, (bal / 10000) * 100);
+        const fillClass = bal < 500 ? 'danger' : bal < 2000 ? 'warn' : '';
+        document.getElementById('pool-info').innerHTML = `
+          <div class="metric"><span class="label">Balance</span><span class="value ${fillClass}">${p.balance} USDT</span></div>
+          <div class="gauge-bar"><div class="gauge-fill ${fillClass}" style="width:${fillPct}%"></div></div>
+          <br>
+          <div class="metric"><span class="label">Multiplier</span><span class="value">${p.multiplier}x</span></div>
+          <div class="metric"><span class="label">Rounds Until Depletion</span><span class="value ${p.roundsUntilDepletion < 3 ? 'danger' : ''}">${p.roundsUntilDepletion}</span></div>
+          <div class="metric"><span class="label">Total Distributed</span><span class="value">${p.totalDistributed} USDT</span></div>
+        `;
+      } catch(e) { document.getElementById('pool-info').innerHTML = '<span style="color:var(--danger)">Error loading pool</span>'; }
+    }
+
+    async function fetchLeaderboard() {
+      try {
+        const data = await fetch('/api/round/leaderboard').then(x => x.json());
+        if (!data.length) { document.getElementById('leaderboard').innerHTML = '<span style="color:var(--muted)">No confirmed tips yet</span>'; return; }
+        const maxScore = BigInt(data[0]?.score || '1');
+        let html = '';
+        data.slice(0, 10).forEach((entry, i) => {
+          const score = BigInt(entry.score);
+          const pct = maxScore > 0n ? Number((score * 100n) / maxScore) : 0;
+          html += `<div class="lb-row">
+            <span class="lb-rank">${i + 1}.</span>
+            <span class="lb-name">@${entry.creator}</span>
+            <div class="score-bar"><div class="score-fill" style="width:${pct}%"></div></div>
+            <span class="lb-amount">${entry.total} USDT</span>
+            <span style="color:var(--muted);font-size:10px;width:90px;text-align:right">score: ${entry.score}</span>
+          </div>`;
+        });
+        document.getElementById('leaderboard').innerHTML = html;
+      } catch(e) { document.getElementById('leaderboard').innerHTML = '<span style="color:var(--danger)">Error loading leaderboard</span>'; }
+    }
+
+    async function fetchSybil() {
+      try {
+        const flags = await fetch('/api/sybil/flags').then(x => x.json());
+        if (!flags.length) { document.getElementById('sybil-info').innerHTML = '<span class="sybil-clean">✓ No sybil flags this round</span>'; return; }
+        let html = `<div style="color:var(--muted);margin-bottom:8px">${flags.length} flag(s) detected</div>`;
+        flags.slice(0, 5).forEach(f => {
+          const reasons = (() => { try { return JSON.parse(f.reasons).join(', '); } catch { return f.reasons; } })();
+          html += `<div style="padding:5px 0;border-bottom:1px solid var(--border)">
+            <div><span class="sybil-flag">⚠ score: ${f.flag_score.toFixed(2)}</span> <span style="color:var(--muted)">[${f.method}]</span></div>
+            <div style="color:var(--muted);font-size:11px">${reasons}</div>
+          </div>`;
+        });
+        document.getElementById('sybil-info').innerHTML = html;
+      } catch(e) { document.getElementById('sybil-info').innerHTML = '<span style="color:var(--danger)">Error loading sybil data</span>'; }
+    }
+
+    async function fetchHistory() {
+      try {
+        const rounds = await fetch('/api/rounds').then(x => x.json());
+        if (!rounds.length) { document.getElementById('rounds-history').innerHTML = '<span style="color:var(--muted)">No rounds yet</span>'; return; }
+        let html = '<table><thead><tr><th>#</th><th>Status</th><th>Matched</th><th>Tippers</th></tr></thead><tbody>';
+        rounds.slice(0, 10).forEach(r => {
+          html += `<tr>
+            <td>${r.round_number}</td>
+            <td>${badge(r.status)}</td>
+            <td style="color:var(--accent)">${r.total_matched} USDT</td>
+            <td>${r.tipper_count}</td>
+          </tr>`;
+        });
+        html += '</tbody></table>';
+        document.getElementById('rounds-history').innerHTML = html;
+      } catch(e) { document.getElementById('rounds-history').innerHTML = '<span style="color:var(--danger)">Error loading history</span>'; }
+    }
+
+    function tick() {
+      document.getElementById('now').textContent = new Date().toUTCString();
+      countdown--;
+      document.getElementById('countdown').textContent = countdown;
+      if (countdown <= 0) {
+        countdown = 30;
+        refreshAll();
+      }
+    }
+
+    async function refreshAll() {
+      await Promise.all([fetchRound(), fetchPool(), fetchLeaderboard(), fetchSybil(), fetchHistory()]);
+    }
+
+    refreshAll();
+    setInterval(tick, 1000);
+  </script>
+</body>
+</html>
