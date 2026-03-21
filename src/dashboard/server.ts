@@ -18,12 +18,31 @@ const flagsRepo = new SybilFlagsRepository();
 const creatorsRepo = new CreatorsRepository();
 const poolMonitor = new PoolMonitor();
 
-app.get('/api/round/current', (_req, res) => {
+const dashRateMap = new Map<string, { count: number; resetAt: number }>();
+
+function dashRateLimit(req: express.Request, res: express.Response, next: express.NextFunction): void {
+  const ip = req.ip ?? 'unknown';
+  const now = Date.now();
+  const entry = dashRateMap.get(ip);
+  if (!entry || now > entry.resetAt) {
+    dashRateMap.set(ip, { count: 1, resetAt: now + 60_000 });
+    next();
+    return;
+  }
+  if (entry.count >= 60) {
+    res.status(429).json({ error: 'Too many requests' });
+    return;
+  }
+  entry.count++;
+  next();
+}
+
+app.get('/api/round/current', dashRateLimit, (_req, res) => {
   const round = roundsRepo.findCurrent();
   res.json(round ?? { error: 'No active round' });
 });
 
-app.get('/api/round/leaderboard', (_req, res) => {
+app.get('/api/round/leaderboard', dashRateLimit, (_req, res) => {
   const round = roundsRepo.findCurrent() ?? roundsRepo.findLatestCompleted();
   if (!round) { res.json([]); return; }
   const tips = tipsRepo.findConfirmedByRound(round.id);
@@ -45,7 +64,7 @@ app.get('/api/round/leaderboard', (_req, res) => {
   res.json(result);
 });
 
-app.get('/api/pool', async (_req, res) => {
+app.get('/api/pool', dashRateLimit, async (_req, res) => {
   const report = await poolMonitor.generatePoolReport();
   res.json({
     balance: baseUnitsToUsdt(report.balance),
@@ -55,18 +74,18 @@ app.get('/api/pool', async (_req, res) => {
   });
 });
 
-app.get('/api/sybil/flags', (_req, res) => {
+app.get('/api/sybil/flags', dashRateLimit, (_req, res) => {
   const round = roundsRepo.findCurrent();
   if (!round) { res.json([]); return; }
   const flags = flagsRepo.findFlaggedByRound(round.id);
   res.json(flags);
 });
 
-app.get('/api/rounds', (_req, res) => {
+app.get('/api/rounds', dashRateLimit, (_req, res) => {
   res.json(roundsRepo.findAll(20));
 });
 
-app.get('/', (_req, res) => {
+app.get('/', dashRateLimit, (_req, res) => {
   res.sendFile(path.join(__dirname, 'index.html'));
 });
 
