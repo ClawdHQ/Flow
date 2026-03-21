@@ -1,8 +1,8 @@
-import Anthropic from '@anthropic-ai/sdk';
 import { TipRecord, TipsRepository } from '../storage/repositories/tips.js';
 import { SybilFlagsRepository } from '../storage/repositories/sybil-flags.js';
 import { SYBIL_ANALYSIS_PROMPT } from './prompts.js';
 import { logger } from '../utils/logger.js';
+import { llmClient, getModelName } from '../utils/llm-client.js';
 
 const tipsRepo = new TipsRepository();
 const flagsRepo = new SybilFlagsRepository();
@@ -19,15 +19,10 @@ export interface SybilAnalysis {
 }
 
 export class SybilDetector {
-  private client: Anthropic | null = null;
   private threshold: number;
 
   constructor() {
     this.threshold = parseFloat(process.env['SYBIL_WEIGHT_THRESHOLD'] ?? '0.7');
-    const apiKey = process.env['ANTHROPIC_API_KEY'];
-    if (apiKey && apiKey !== 'test') {
-      this.client = new Anthropic({ apiKey });
-    }
   }
 
   async analyzeTip(tip: TipRecord): Promise<SybilAnalysis> {
@@ -68,10 +63,10 @@ export class SybilDetector {
     let llmReasoning: string | undefined;
 
     // Use LLM for borderline cases
-    if (flagScore >= 0.3 && flagScore < 0.65 && this.client) {
+    if (flagScore >= 0.3 && flagScore < 0.65 && llmClient) {
       try {
-        const response = await this.client.messages.create({
-          model: process.env['ANTHROPIC_MODEL'] ?? 'claude-sonnet-4-20250514',
+        const response = await llmClient.messages.create({
+          model: getModelName(),
           max_tokens: 256,
           system: SYBIL_ANALYSIS_PROMPT,
           messages: [{

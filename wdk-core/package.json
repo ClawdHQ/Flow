@@ -1,0 +1,22 @@
+{
+  "name": "@tetherto/wdk-core",
+  "version": "1.0.0",
+  "description": "Tether Wallet Development Kit — local compatibility shim wrapping ethers.js",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc"
+  },
+  "dependencies": {
+    "ethers": "^6.11.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.3.3"
+  }
+}

@@ -4,3 +4,5 @@ node_modules/
 *.db-shm
 .env
 dist/
+wdk-core/node_modules/
+wdk-core/dist/

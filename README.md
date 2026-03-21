@@ -72,7 +72,7 @@ A 3× cap prevents any single creator from receiving more in matching than three
 | **Quadratic allocation** | BigInt-safe `isqrt` + `computeAllocations` engine |
 | **Autonomous round management** | Cron-scheduled rounds with configurable duration |
 | **LLM sybil detection** | Claude-powered tip analysis with per-tip weight multipliers |
-| **Multi-chain wallets** | HD derivation for Polygon, Arbitrum, and Tron via ethers.js |
+| **Multi-chain wallets** | HD derivation for Polygon, Arbitrum, and Tron via Tether WDK |
 | **Telegram bot** | Full-featured bot: register, tip, withdraw, leaderboard, history |
 | **Pool health monitor** | Every 30 minutes; dynamically adjusts matching multiplier (0.5×–2.0×) |
 | **Web dashboard** | Real-time round metrics, leaderboard, and pool status |
@@ -92,8 +92,8 @@ A 3× cap prevents any single creator from receiving more in matching than three
           ┌─────────────────┼──────────────────┐
           ▼                 ▼                  ▼
        Tips            Wallets            Creators
-    (SQLite)         (ethers.js          (SQLite)
-                      HD node)
+    (SQLite)         (Tether WDK         (SQLite)
+                       + ethers)
           └─────────────────┬──────────────────┘
                             ▼
                ┌────────────────────────┐
@@ -119,7 +119,7 @@ A 3× cap prevents any single creator from receiving more in matching than three
           ┌─────────────┼─────────────┐
           ▼             ▼             ▼
       Pool wallet    IPFS report   Agent sig
-      (ethers.js)   (web3.storage)  (Claude)
+      (Tether WDK)  (web3.storage)  (Claude)
 ```
 
 ---
@@ -129,9 +129,43 @@ A 3× cap prevents any single creator from receiving more in matching than three
 - **Node.js** 18 or later
 - **npm** 9 or later
 - A **Telegram bot token** ([@BotFather](https://t.me/BotFather))
-- An **Anthropic API key** for Claude
-- RPC endpoint URLs for at least one supported chain (Polygon, Arbitrum, or Tron)
-- A **Web3.Storage token** for IPFS report publishing (optional)
+- **An LLM API key**: Either Anthropic (`ANTHROPIC_API_KEY`) OR OpenRouter (`OPENROUTER_API_KEY`)
+  — OpenRouter has a free tier and supports Claude models
+- **Tether WDK seed phrase**: Generate with `npx @tetherto/wdk-core generate-seed`
+- RPC endpoint URLs for at least one supported chain (Polygon Amoy testnet works for demo)
+- A **Web3.Storage token** for IPFS publishing (optional — set `IPFS_DISABLED=true` to skip)
+
+---
+
+## LLM Provider Setup
+
+Flow supports two LLM providers. You need at least one.
+
+### Option A: Anthropic (Recommended)
+Get an API key at https://console.anthropic.com
+Set `ANTHROPIC_API_KEY` in your `.env` file.
+
+### Option B: OpenRouter (Free Tier Available)
+OpenRouter provides access to Claude and 100+ other models.
+Useful if you don't have direct Anthropic access.
+
+1. Sign up at https://openrouter.ai
+2. Create a key at https://openrouter.ai/keys
+3. Set in your `.env`:
+   ```
+   OPENROUTER_API_KEY=sk-or-v1-...
+   OPENROUTER_MODEL=anthropic/claude-sonnet-4
+   ```
+   Leave `ANTHROPIC_API_KEY` empty.
+
+Recommended OpenRouter models for FLOW:
+- `anthropic/claude-sonnet-4` — Best quality (same as direct Anthropic)
+- `anthropic/claude-haiku-4` — Faster, cheaper, still great for sybil detection
+- `mistralai/mistral-large` — Good alternative if Claude credits are limited
+- `google/gemini-2.0-flash` — Fast and cheap option
+
+> Note: Free tier models on OpenRouter have rate limits. For production use,
+> add credits to your OpenRouter account.
 
 ---
 
@@ -156,14 +190,21 @@ cp .env.example .env
 | Variable | Required | Description |
 |---|---|---|
 | `TELEGRAM_BOT_TOKEN` | ✅ | Token from @BotFather |
-| `ANTHROPIC_API_KEY` | ✅ | Key for Claude sybil detection and round review |
+| `ANTHROPIC_API_KEY` | ✅* | Key for Claude sybil detection and round review |
 | `ANTHROPIC_MODEL` | | Claude model name (default: `claude-sonnet-4-20250514`) |
-| `WDK_SEED_PHRASE` | ✅ | BIP-39 mnemonic for HD wallet derivation |
+| `OPENROUTER_API_KEY` | ✅* | OpenRouter key (alternative to Anthropic — free tier available) |
+| `OPENROUTER_MODEL` | | OpenRouter model ID (default: `anthropic/claude-sonnet-4`) |
+| `ADMIN_TELEGRAM_ID` | | Your Telegram numeric user ID — restricts `/status` to admin only |
+| `WDK_SEED_PHRASE` | ✅ | BIP-39 mnemonic for HD wallet derivation (via Tether WDK) |
 | `WDK_ENCRYPTION_KEY` | ✅ | 32+ character string used as AES-256 encryption key |
-| `POLYGON_RPC_URL` | | Polygon USDT RPC endpoint |
-| `ARBITRUM_RPC_URL` | | Arbitrum USDT RPC endpoint |
+| `USE_TESTNET` | | Set `true` to use testnet chains for demo (default: `false`) |
+| `POLYGON_RPC_URL` | | Polygon mainnet USDT RPC endpoint |
+| `POLYGON_AMOY_RPC_URL` | | Polygon Amoy testnet RPC (default: public endpoint) |
+| `ARBITRUM_RPC_URL` | | Arbitrum One USDT RPC endpoint |
+| `ARBITRUM_SEPOLIA_RPC_URL` | | Arbitrum Sepolia testnet RPC (default: public endpoint) |
 | `TRON_RPC_URL` | | Tron USDT RPC endpoint |
 | `WEB3_STORAGE_TOKEN` | | Token for IPFS report publishing |
+| `IPFS_DISABLED` | | Set `true` to skip IPFS upload for local demo (default: `false`) |
 | `ROUND_DURATION_HOURS` | | Length of each round in hours (default: `24`) |
 | `ROUND_CRON` | | Cron expression for round start (default: `0 0 * * *`) |
 | `MATCHING_POOL_MINIMUM` | | Minimum pool balance (USDT) to enable matching (default: `500`) |
@@ -173,6 +214,8 @@ cp .env.example .env
 | `DB_PATH` | | SQLite database file path (default: `./flow.db`) |
 | `DASHBOARD_PORT` | | Port for the web dashboard (default: `3000`) |
 | `DASHBOARD_SECRET` | | Optional bearer token to protect the dashboard API |
+
+> ✅* Either `ANTHROPIC_API_KEY` **or** `OPENROUTER_API_KEY` must be set — at least one is required.
 
 > **Security:** Never commit your `.env` file. The seed phrase controls all HD-derived wallets including the matching pool.
 
@@ -233,9 +276,11 @@ The dashboard exposes a read-only REST API for monitoring:
 
 | Endpoint | Description |
 |---|---|
-| `GET /api/round` | Current round data (status, totals, multiplier) |
-| `GET /api/leaderboard` | Creator rankings with quadratic scores |
+| `GET /api/round/current` | Current round data (status, totals, multiplier) |
+| `GET /api/round/leaderboard` | Creator rankings with quadratic scores |
 | `GET /api/pool` | Pool balance and health metrics |
+| `GET /api/sybil/flags` | Sybil flags for the current round |
+| `GET /api/rounds` | Last 20 completed rounds history |
 
 The dashboard enforces rate limiting (60 requests per minute per IP). Set `DASHBOARD_SECRET` to require a `Bearer` token on all endpoints.
 

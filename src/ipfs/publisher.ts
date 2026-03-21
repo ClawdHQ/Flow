@@ -95,15 +95,25 @@ export async function publishRoundReport(roundId: string, allocationPlan: Alloca
   };
 
   const reportJson = JSON.stringify(report);
+  // Generate a deterministic CID-like identifier from the report content
   const mockCid = 'bafyrei' + crypto.createHash('sha256').update(reportJson).digest('hex').slice(0, 52);
 
+  const ipfsDisabled = process.env['IPFS_DISABLED'] === 'true';
   const token = process.env['WEB3_STORAGE_TOKEN'];
-  if (token && token.length > 0) {
-    // In production: upload to web3.storage or IPFS gateway
+
+  if (ipfsDisabled) {
+    logger.warn({ cid: mockCid }, 'IPFS disabled — round report not published to IPFS');
+  } else if (token && token.length > 0) {
+    // In production: upload to web3.storage using @web3-storage/w3up-client
     logger.info({ cid: mockCid }, 'Would upload to IPFS in production');
   } else {
     logger.info({ cid: mockCid }, 'IPFS mock: WEB3_STORAGE_TOKEN not set');
   }
+
+  // Sign the CID with the pool wallet to demonstrate signing logic
+  // (runs regardless of whether IPFS is disabled — attests to the content hash)
+  const ipfsSignature = await poolWallet.signData(mockCid);
+  report.agentAttestation.ipfsSignature = ipfsSignature;
 
   return {
     cid: mockCid,

@@ -1,3 +1,11 @@
+/**
+ * FLOW Telegram Bot — command wiring and bot factory.
+ *
+ * OpenClaw compatibility: FLOW exposes its core agent functions as
+ * OpenClaw-compatible skills. See src/openclaw-skill.md for the skill
+ * definition that OpenClaw agents can load for file-based instructions.
+ * The bot commands map 1-to-1 with the actions described in that skill file.
+ */
 import { Bot } from 'grammy';
 import { loggerMiddleware } from './middleware/logger.js';
 import { rateLimiter } from './middleware/auth.js';
@@ -26,6 +34,11 @@ export function createBot(token: string): Bot {
   bot.command('leaderboard', handleLeaderboard);
 
   bot.command('status', async ctx => {
+    const adminId = process.env['ADMIN_TELEGRAM_ID'];
+    if (adminId && ctx.from?.id.toString() !== adminId) {
+      await ctx.reply('⛔ This command is restricted to the bot administrator.');
+      return;
+    }
     const round = roundsRepo.findCurrent();
     await ctx.reply(
       `🤖 **FLOW Status**\n\n` +
