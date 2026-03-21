@@ -24,11 +24,15 @@ export async function handleWithdraw(ctx: Context): Promise<void> {
 
   try {
     const txHash = await creatorWallet.withdraw(creator.id, creator.payout_address, balance);
+    const isDemoHash = txHash.startsWith('0xMOCK');
+    const txNote = isDemoHash
+      ? '\n\n⚠️ _Demo mode: tx hash is simulated. Fund the pool wallet and configure RPC for live transfers._'
+      : `\n\n🔗 TX: \`${txHash}\``;
     await ctx.reply(
       `✅ Withdrawal successful!\n\n` +
       `Amount: ${baseUnitsToUsdt(balance)} USDT\n` +
-      `To: \`${creator.payout_address}\`\n` +
-      `TX: \`${txHash}\``,
+      `To: \`${creator.payout_address}\`` +
+      txNote,
       { parse_mode: 'Markdown' }
     );
   } catch (err) {
