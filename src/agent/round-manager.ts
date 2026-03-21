@@ -8,7 +8,7 @@ import { PoolWalletManager } from '../wallet/pool.js';
 import { publishRoundReport } from '../ipfs/publisher.js';
 import { logger } from '../utils/logger.js';
 import { ROUND_REVIEW_PROMPT } from './prompts.js';
-import Anthropic from '@anthropic-ai/sdk';
+import { llmClient, getModelName } from '../utils/llm-client.js';
 
 const roundsRepo = new RoundsRepository();
 const tipsRepo = new TipsRepository();
@@ -17,13 +17,9 @@ const poolWallet = new PoolWalletManager();
 
 export class RoundManager {
   private task: cron.ScheduledTask | null = null;
-  private client: Anthropic | null = null;
 
   constructor() {
-    const apiKey = process.env['ANTHROPIC_API_KEY'];
-    if (apiKey && apiKey !== 'test') {
-      this.client = new Anthropic({ apiKey });
-    }
+    // llmClient is initialized at module load in utils/llm-client.ts
   }
 
   start(): void {
@@ -99,10 +95,10 @@ export class RoundManager {
     const planHash = '0x' + crypto.createHash('sha256').update(planData).digest('hex');
 
     // LLM review
-    if (this.client) {
+    if (llmClient) {
       try {
-        const response = await this.client.messages.create({
-          model: process.env['ANTHROPIC_MODEL'] ?? 'claude-sonnet-4-20250514',
+        const response = await llmClient.messages.create({
+          model: getModelName(),
           max_tokens: 512,
           system: ROUND_REVIEW_PROMPT,
           messages: [{ role: 'user', content: planData }],

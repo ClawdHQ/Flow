@@ -3,16 +3,24 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const configSchema = z.object({
+const baseSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
-  ANTHROPIC_API_KEY: z.string().min(1),
+  ANTHROPIC_API_KEY: z.string().optional(),
   ANTHROPIC_MODEL: z.string().default('claude-sonnet-4-20250514'),
+  OPENROUTER_API_KEY: z.string().optional(),
+  OPENROUTER_BASE_URL: z.string().url().optional().default('https://openrouter.ai/api/v1'),
+  OPENROUTER_MODEL: z.string().optional().default('anthropic/claude-sonnet-4'),
+  ADMIN_TELEGRAM_ID: z.string().optional(),
   WDK_SEED_PHRASE: z.string().min(1),
   WDK_ENCRYPTION_KEY: z.string().min(32),
-  POLYGON_RPC_URL: z.string().url(),
-  ARBITRUM_RPC_URL: z.string().url(),
-  TRON_RPC_URL: z.string().url(),
-  WEB3_STORAGE_TOKEN: z.string().min(1),
+  POLYGON_RPC_URL: z.string().url().optional(),
+  ARBITRUM_RPC_URL: z.string().url().optional(),
+  TRON_RPC_URL: z.string().url().optional(),
+  USE_TESTNET: z.coerce.boolean().default(false),
+  POLYGON_AMOY_RPC_URL: z.string().url().optional(),
+  ARBITRUM_SEPOLIA_RPC_URL: z.string().url().optional(),
+  WEB3_STORAGE_TOKEN: z.string().optional(),
+  IPFS_DISABLED: z.coerce.boolean().default(false),
   ROUND_DURATION_HOURS: z.coerce.number().positive().default(24),
   ROUND_CRON: z.string().default('0 0 * * *'),
   MATCHING_POOL_MINIMUM: z.coerce.number().positive().default(500),
@@ -22,6 +30,18 @@ const configSchema = z.object({
   DB_PATH: z.string().default('./flow.db'),
   DASHBOARD_PORT: z.coerce.number().int().positive().default(3000),
   DASHBOARD_SECRET: z.string().optional(),
+});
+
+const configSchema = baseSchema.superRefine((data, ctx) => {
+  if (!data.ANTHROPIC_API_KEY && !data.OPENROUTER_API_KEY) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message:
+        'Either ANTHROPIC_API_KEY or OPENROUTER_API_KEY must be set. ' +
+        'Get an OpenRouter key (free tier available) at https://openrouter.ai/keys',
+      path: ['ANTHROPIC_API_KEY'],
+    });
+  }
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -43,7 +63,7 @@ export const config: Config = new Proxy({} as Config, {
         _config = loadConfig();
       } catch {
         // Return defaults for testing
-        return (configSchema.shape as Record<string, z.ZodTypeAny>)[prop]?.parse(undefined);
+        return (baseSchema.shape as Record<string, z.ZodTypeAny>)[prop]?.parse(undefined);
       }
     }
     return (_config as Record<string, unknown>)[prop];
