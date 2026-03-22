@@ -38,10 +38,10 @@ match_allocation(creator) = pool_balance × score(creator) / Σ all_scores
 
 | Creator | Tips received | Total direct | Quadratic score |
 |---|---|---|---|
-| Alice | 10 × 1 USDT | 10 USDT | `(10 × √1)² = 100` |
-| Bob | 1 × 10 USDT | 10 USDT | `(1 × √10)² ≈ 10` |
+| Alice | 10 × 1 USD₮ | 10 USD₮ | `(10 × √1)² = 100` |
+| Bob | 1 × 10 USD₮ | 10 USD₮ | `(1 × √10)² ≈ 10` |
 
-Alice and Bob both received **10 USDT** in total, but Alice's score is 10× higher because her support came from ten independent contributors. Broad community support wins over concentrated whale donations.
+Alice and Bob both received **10 USD₮** in total, but Alice's score is 10× higher because her support came from ten independent contributors. Broad community support wins over concentrated whale donations.
 
 ### Round Lifecycle
 
@@ -52,7 +52,7 @@ Open → Locked → Analyzed → Executed → Archived → (new round opens)
 1. **Open** — Tips accumulate throughout the round window (default: 24 hours).
 2. **Locked** — New tips are paused; sybil analysis runs on the accumulated tip set.
 3. **Analyzed** — Claude reviews the allocation plan for anomalies before execution.
-4. **Executed** — USDT transfers are sent from the pool wallet to each creator.
+4. **Executed** — USD₮ transfers are sent from the pool wallet to each creator.
 5. **Archived** — Round report is published to IPFS with an agent signature for auditability.
 
 ### Sybil Protection
@@ -72,7 +72,8 @@ A 3× cap prevents any single creator from receiving more in matching than three
 | **Quadratic allocation** | BigInt-safe `isqrt` + `computeAllocations` engine |
 | **Autonomous round management** | Cron-scheduled rounds with configurable duration |
 | **LLM sybil detection** | Claude-powered tip analysis with per-tip weight multipliers |
-| **Multi-chain wallets** | HD derivation for Polygon, Arbitrum, and Tron via Tether WDK |
+| **Multi-chain wallets** | HD derivation for Ethereum, Polygon, Arbitrum, Avalanche, Celo, and Tron via Tether WDK |
+| **Fiat on-ramp / off-ramp** | MoonPay-powered `/fiat`, `/buy`, and `/sell` flows for fiat-to-crypto and crypto-to-fiat links |
 | **Telegram bot** | Full-featured bot: register, tip, withdraw, leaderboard, history |
 | **Pool health monitor** | Every 30 minutes; dynamically adjusts matching multiplier (0.5×–2.0×) |
 | **Web dashboard** | Real-time round metrics, leaderboard, and pool status |
@@ -138,7 +139,7 @@ A 3× cap prevents any single creator from receiving more in matching than three
   Or use any BIP-39 generator (e.g. https://iancoleman.io/bip39/ — use offline only).
   Set the output as `WDK_SEED_PHRASE` in your `.env`.
   ⚠️ This controls all wallets including the matching pool. Never commit it.
-- RPC endpoint URLs for at least one supported chain (Polygon Amoy testnet works for demo)
+- RPC endpoint URLs for at least one supported chain (Ethereum Sepolia is the default demo path)
 - A **Web3.Storage token** for IPFS publishing (optional — set `IPFS_DISABLED=true` to skip)
 
 ---
@@ -203,17 +204,35 @@ cp .env.example .env
 | `ADMIN_TELEGRAM_ID` | | Your Telegram numeric user ID — restricts `/status` to admin only |
 | `WDK_SEED_PHRASE` | ✅ | BIP-39 mnemonic for HD wallet derivation (via Tether WDK) |
 | `WDK_ENCRYPTION_KEY` | ✅ | 32+ character string used as AES-256 encryption key |
+| `MOONPAY_API_KEY` | | MoonPay publishable API key for fiat on-ramp/off-ramp |
+| `MOONPAY_SECRET_KEY` | | MoonPay secret key for signed widget URLs |
+| `MOONPAY_CACHE_TIME_MS` | | Optional MoonPay supported-currency cache duration in ms |
+| `MOONPAY_WIDGET_THEME` | | Default MoonPay widget theme: `dark` or `light` |
+| `MOONPAY_WIDGET_COLOR` | | Optional MoonPay accent color, e.g. `#1f2937` |
+| `MOONPAY_WIDGET_LANGUAGE` | | Optional widget language, e.g. `en` |
+| `MOONPAY_REDIRECT_URL` | | Optional redirect URL after MoonPay flow completion |
+| `DEFAULT_CHAIN` | | Optional default chain for bot and wallet fallbacks. Defaults to `ethereum` when `USE_TESTNET=true`, otherwise `polygon`. |
 | `USE_TESTNET` | | Set `true` to use testnet chains for demo (default: `false`) |
-| `POLYGON_RPC_URL` | | Polygon mainnet USDT RPC endpoint |
+| `ETHEREUM_RPC_URL` | | Ethereum mainnet RPC endpoint |
+| `ETHEREUM_SEPOLIA_RPC_URL` | | Ethereum Sepolia RPC endpoint |
+| `ETHEREUM_SEPOLIA_USDT_ADDRESS` | | Sepolia USD₮ token address if using Ethereum testnet mode. Defaults to Pimlico USD₮: `0xd077A400968890Eacc75cdc901F0356c943e4fDb` |
+| `POLYGON_RPC_URL` | | Polygon mainnet USD₮ RPC endpoint |
 | `POLYGON_AMOY_RPC_URL` | | Polygon Amoy testnet RPC (default: public endpoint) |
-| `ARBITRUM_RPC_URL` | | Arbitrum One USDT RPC endpoint |
+| `ARBITRUM_RPC_URL` | | Arbitrum One USD₮ RPC endpoint |
 | `ARBITRUM_SEPOLIA_RPC_URL` | | Arbitrum Sepolia testnet RPC (default: public endpoint) |
-| `TRON_RPC_URL` | | Tron USDT RPC endpoint |
+| `AVALANCHE_RPC_URL` | | Avalanche C-Chain RPC endpoint |
+| `AVALANCHE_FUJI_RPC_URL` | | Avalanche Fuji RPC endpoint |
+| `AVALANCHE_FUJI_USDT_ADDRESS` | | Fuji USD₮ token address if using Avalanche testnet mode |
+| `CELO_RPC_URL` | | Celo mainnet RPC endpoint |
+| `CELO_SEPOLIA_RPC_URL` | | Celo Sepolia RPC endpoint |
+| `CELO_SEPOLIA_USDT_ADDRESS` | | Celo Sepolia USD₮ token address if using testnet mode |
+| `TRON_RPC_URL` | | Tron USD₮ RPC endpoint |
+| `TRON_NILE_RPC_URL` | | Tron Nile RPC endpoint |
 | `WEB3_STORAGE_TOKEN` | | Token for IPFS report publishing |
 | `IPFS_DISABLED` | | Set `true` to skip IPFS upload for local demo (default: `false`) |
 | `ROUND_DURATION_HOURS` | | Length of each round in hours (default: `24`) |
 | `ROUND_CRON` | | Cron expression for round start (default: `0 0 * * *`) |
-| `MATCHING_POOL_MINIMUM` | | Minimum pool balance (USDT) to enable matching (default: `500`) |
+| `MATCHING_POOL_MINIMUM` | | Minimum pool balance (USD₮) to enable matching (default: `500`) |
 | `MATCHING_POOL_BOOST_THRESHOLD` | | Pool balance above which multiplier is boosted (default: `5000`) |
 | `SYBIL_WEIGHT_THRESHOLD` | | Tips below this weight are excluded from matching (default: `0.7`) |
 | `PROTOCOL_FEE_BPS` | | Protocol fee in basis points, e.g. `100` = 1% (default: `100`) |
@@ -266,12 +285,20 @@ npm run seed-pool   # initialize pool wallet funding
 | Command | Description |
 |---|---|
 | `/start` | Welcome message and command reference |
-| `/register <wallet> [chain]` | Register as a creator with a payout wallet address. `chain` defaults to `polygon`. |
-| `/tip @username <amount> [msg]` | Send a tip (in USDT) to a registered creator. |
+| `/register <wallet> [chain]` | Register as a creator with a payout wallet address. `chain` defaults to `DEFAULT_CHAIN`, which is `ethereum` in demo mode and `polygon` otherwise. |
+| `/tip @username <amount> [msg]` | Send a tip (in USD₮) to a registered creator. |
+| `/deposit` | Show your creator accumulation wallet so you can deposit USD₮ into FLOW. |
+| `/balance` | Check the current balance of your accumulation wallet. |
 | `/pool` | Show current pool balance, multiplier, and health status. |
+| `/round` | Show the current round metrics exposed by the dashboard. |
+| `/rounds [limit]` | Show recent rounds history from the dashboard (`limit` max `20`). |
 | `/leaderboard` | Display current round standings with quadratic scores. |
+| `/sybil` | Show current-round sybil flags exposed by the dashboard. |
 | `/history` | View your sent and received tip history. |
 | `/withdraw` | Withdraw accrued earnings to your registered payout address. |
+| `/fiat` | Inspect MoonPay status, supported currencies, countries, and transaction status. |
+| `/buy <crypto> <fiat> <fiat:100\|crypto:0.1> <recipient>` | Generate a MoonPay buy widget URL for fiat on-ramp. |
+| `/sell <crypto> <fiat> <crypto:0.5\|fiat:100> [refund_wallet]` | Generate a MoonPay sell widget URL for fiat off-ramp. |
 | `/status` | Show current round number, status, and total tippers. |
 
 ---
@@ -305,6 +332,7 @@ Tests cover:
 - **Quadratic math** (`tests/quadratic.test.ts`) — `isqrt` correctness across 0–1M, many-small vs. few-large tip scenarios, the 3× cap, pool safety invariant, and empty-round handling.
 - **Round manager** (`tests/round-manager.test.ts`) — round lifecycle state transitions and execution logic.
 - **Sybil detection** (`tests/sybil.test.ts`) — rule-based scoring accuracy.
+- **Fiat integration** (`tests/fiat.test.ts`) — MoonPay amount parsing, config gating, and widget request shaping.
 - **Wallet management** (`tests/wallet.test.ts`) — HD derivation paths and key encryption/decryption.
 
 ---
@@ -334,6 +362,9 @@ Flow/
 │   │   ├── escrow.ts           # Per-tip escrow wallets
 │   │   └── router.ts           # Transaction routing by chain
 │   │
+│   ├── fiat/
+│   │   └── moonpay.ts          # MoonPay fiat on-ramp/off-ramp service
+│   │
 │   ├── bot/
 │   │   ├── index.ts            # Bot factory and command wiring
 │   │   ├── commands/           # One file per command handler
@@ -355,9 +386,12 @@ Flow/
 │   │   ├── index.ts            # Zod env schema validation
 │   │   └── chains.ts           # Per-chain RPC and token config
 │   │
+│   ├── types/
+│   │   └── tronweb.d.ts        # Local TronWeb module typing shim
+│   │
 │   └── utils/
 │       ├── logger.ts           # Pino structured logger
-│       ├── math.ts             # USDT unit conversions
+│       ├── math.ts             # USD₮ unit conversions
 │       └── retry.ts            # Exponential backoff helper
 │
 ├── scripts/
@@ -366,6 +400,7 @@ Flow/
 │   └── deploy-contracts.ts     # Smart contract deployment placeholder
 │
 ├── tests/
+│   ├── fiat.test.ts
 │   ├── quadratic.test.ts
 │   ├── round-manager.test.ts
 │   ├── sybil.test.ts
@@ -393,12 +428,12 @@ Flow/
 - **Demo mode transfers**: When no live RPC is configured (e.g. during local simulation),
   `sendUSDT()` returns a deterministic mock transaction hash instead of a real on-chain
   transaction. All bot messages clearly indicate when demo mode is active. To enable
-  real transfers, configure `POLYGON_AMOY_RPC_URL` and fund the pool wallet with test
-  USDt from [pimlico.io/faucet](https://www.pimlico.io/faucet).
+  real transfers, configure the RPC and USD₮ token address for the chain you want to
+  use in `.env`, then fund the corresponding pool wallet.
 
-- **TRON support**: TRON creator payout routing is config-present but not yet wired to
-  `@tetherto/wdk-wallet-tron`. Creators selecting TRON as their payout chain will
-  receive funds on Polygon until TRON module integration is complete.
+- **MoonPay credentials**: `/fiat`, `/buy`, and `/sell` require both
+  `MOONPAY_API_KEY` and `MOONPAY_SECRET_KEY`. Without them, FLOW will show a friendly
+  configuration message instead of creating widget URLs.
 
 - **IPFS archival**: When `IPFS_DISABLED=true` or no `WEB3_STORAGE_TOKEN` is set,
   round reports are published with a deterministic mock CID. The signing and

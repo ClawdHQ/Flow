@@ -1,23 +1,33 @@
 import cron from 'node-cron';
 import { PoolWalletManager } from '../wallet/pool.js';
 import { RoundsRepository } from '../storage/repositories/rounds.js';
+import { SupportedChain, SUPPORTED_CHAINS } from '../config/chains.js';
 import { logger } from '../utils/logger.js';
 import { baseUnitsToUsdt } from '../utils/math.js';
 
 export interface PoolReport {
   balance: bigint;
+  chainBalances: { chain: SupportedChain; balance: bigint }[];
   multiplier: number;
   projectedPoolUsage: bigint;
   roundsUntilDepletion: number;
   totalDistributedAllTime: bigint;
 }
 
-const poolWallet = new PoolWalletManager();
 const roundsRepo = new RoundsRepository();
 
 export class PoolMonitor {
   private task: cron.ScheduledTask | null = null;
   private currentMultiplier = 1.0;
+
+  private async getChainBalances(): Promise<Array<{ chain: SupportedChain; balance: bigint }>> {
+    return Promise.all(
+      SUPPORTED_CHAINS.map(async chain => ({
+        chain,
+        balance: await new PoolWalletManager(chain).getBalance(),
+      }))
+    );
+  }
 
   start(): void {
     this.task = cron.schedule('*/30 * * * *', async () => {
@@ -36,7 +46,8 @@ export class PoolMonitor {
   }
 
   async checkPoolHealth(): Promise<void> {
-    const balance = await poolWallet.getBalance();
+    const chainBalances = await this.getChainBalances();
+    const balance = chainBalances.reduce((sum, pool) => sum + pool.balance, 0n);
     const minimum = BigInt(Math.round((parseFloat(process.env['MATCHING_POOL_MINIMUM'] ?? '500')) * 1_000_000));
     const boost = BigInt(Math.round((parseFloat(process.env['MATCHING_POOL_BOOST_THRESHOLD'] ?? '5000')) * 1_000_000));
 
@@ -62,7 +73,8 @@ export class PoolMonitor {
   }
 
   async generatePoolReport(): Promise<PoolReport> {
-    const balance = await poolWallet.getBalance();
+    const chainBalances = await this.getChainBalances();
+    const balance = chainBalances.reduce((sum, pool) => sum + pool.balance, 0n);
     const rounds = roundsRepo.findAll(10);
     const avgUsage = rounds.length > 0
       ? rounds.reduce((s, r) => s + BigInt(r.pool_used), 0n) / BigInt(rounds.length)
@@ -72,6 +84,7 @@ export class PoolMonitor {
 
     return {
       balance,
+      chainBalances,
       multiplier: this.currentMultiplier,
       projectedPoolUsage: avgUsage,
       roundsUntilDepletion,

@@ -1,7 +1,7 @@
 import { getDb } from '../storage/db.js';
-import { walletManager } from '../wallet/index.js';
 import { PoolMonitor } from './pool-monitor.js';
 import { RoundManager } from './round-manager.js';
+import { resumePendingTipConfirmations } from '../bot/tip-monitor.js';
 import { RoundsRepository } from '../storage/repositories/rounds.js';
 import { logger } from '../utils/logger.js';
 import dotenv from 'dotenv';
@@ -36,8 +36,10 @@ async function bootstrap(): Promise<void> {
     const { createBot } = await import('../bot/index.js');
     const bot = createBot(token);
     await bot.start();
+    await resumePendingTipConfirmations(bot);
     logger.info('Telegram bot started');
   } else {
+    await resumePendingTipConfirmations();
     logger.warn('TELEGRAM_BOT_TOKEN not set, bot disabled');
   }
 

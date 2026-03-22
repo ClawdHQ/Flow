@@ -1,7 +1,19 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
-dotenv.config();
+const projectRoot = path.dirname(fileURLToPath(new URL('../../package.json', import.meta.url)));
+dotenv.config({ path: path.join(projectRoot, '.env') });
+
+const envBoolean = z.preprocess(value => {
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase();
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+    if (['false', '0', 'no', 'off', ''].includes(normalized)) return false;
+  }
+  return value;
+}, z.boolean());
 
 const baseSchema = z.object({
   TELEGRAM_BOT_TOKEN: z.string().min(1),
@@ -13,14 +25,32 @@ const baseSchema = z.object({
   ADMIN_TELEGRAM_ID: z.string().optional(),
   WDK_SEED_PHRASE: z.string().min(1),
   WDK_ENCRYPTION_KEY: z.string().min(32),
+  MOONPAY_API_KEY: z.string().optional(),
+  MOONPAY_SECRET_KEY: z.string().optional(),
+  MOONPAY_CACHE_TIME_MS: z.coerce.number().int().positive().optional(),
+  MOONPAY_WIDGET_THEME: z.enum(['dark', 'light']).optional(),
+  MOONPAY_WIDGET_COLOR: z.string().regex(/^#?[0-9a-fA-F]{6}$/).optional(),
+  MOONPAY_WIDGET_LANGUAGE: z.string().min(2).max(10).optional(),
+  MOONPAY_REDIRECT_URL: z.string().url().optional(),
+  DEFAULT_CHAIN: z.string().optional(),
+  ETHEREUM_RPC_URL: z.string().url().optional(),
   POLYGON_RPC_URL: z.string().url().optional(),
   ARBITRUM_RPC_URL: z.string().url().optional(),
+  AVALANCHE_RPC_URL: z.string().url().optional(),
+  CELO_RPC_URL: z.string().url().optional(),
   TRON_RPC_URL: z.string().url().optional(),
-  USE_TESTNET: z.coerce.boolean().default(false),
+  USE_TESTNET: envBoolean.default(false),
+  ETHEREUM_SEPOLIA_RPC_URL: z.string().url().optional(),
+  ETHEREUM_SEPOLIA_USDT_ADDRESS: z.string().optional(),
   POLYGON_AMOY_RPC_URL: z.string().url().optional(),
   ARBITRUM_SEPOLIA_RPC_URL: z.string().url().optional(),
+  AVALANCHE_FUJI_RPC_URL: z.string().url().optional(),
+  AVALANCHE_FUJI_USDT_ADDRESS: z.string().optional(),
+  CELO_SEPOLIA_RPC_URL: z.string().url().optional(),
+  CELO_SEPOLIA_USDT_ADDRESS: z.string().optional(),
+  TRON_NILE_RPC_URL: z.string().url().optional(),
   WEB3_STORAGE_TOKEN: z.string().optional(),
-  IPFS_DISABLED: z.coerce.boolean().default(false),
+  IPFS_DISABLED: envBoolean.default(false),
   ROUND_DURATION_HOURS: z.coerce.number().positive().default(24),
   ROUND_CRON: z.string().default('0 0 * * *'),
   MATCHING_POOL_MINIMUM: z.coerce.number().positive().default(500),

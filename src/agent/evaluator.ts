@@ -1,7 +1,9 @@
 import { TipsRepository } from '../storage/repositories/tips.js';
+import { CreatorsRepository } from '../storage/repositories/creators.js';
 import { RoundsRepository } from '../storage/repositories/rounds.js';
 import { computeQuadraticScore } from '../quadratic/index.js';
 import { PoolWalletManager } from '../wallet/pool.js';
+import { resolveSupportedChain } from '../wallet/addresses.js';
 
 export interface RoundStats {
   roundId: string;
@@ -12,8 +14,8 @@ export interface RoundStats {
 }
 
 const tipsRepo = new TipsRepository();
+const creatorsRepo = new CreatorsRepository();
 const roundsRepo = new RoundsRepository();
-const poolWallet = new PoolWalletManager();
 
 export class TipEvaluator {
   async evaluateTip(tipId: string): Promise<void> {
@@ -26,12 +28,14 @@ export class TipEvaluator {
   async getProjectedMatch(creatorId: string): Promise<bigint> {
     const round = roundsRepo.findCurrent();
     if (!round) return 0n;
+    const creator = creatorsRepo.findById(creatorId);
+    if (!creator) return 0n;
     const tips = tipsRepo.findConfirmedByRound(round.id)
       .filter(t => t.creator_id === creatorId);
     if (tips.length === 0) return 0n;
     const contributions = tips.map(t => BigInt(t.effective_amount));
     const score = computeQuadraticScore(contributions);
-    const poolBalance = await poolWallet.getBalance();
+    const poolBalance = await new PoolWalletManager(resolveSupportedChain(creator.preferred_chain)).getBalance();
     return poolBalance > 0n ? (poolBalance * score) / (score * 10n) : 0n;
   }
 

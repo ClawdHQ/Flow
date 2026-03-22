@@ -28,7 +28,7 @@ export async function handleHistory(ctx: Context): Promise<void> {
     if (tips.length === 0) continue;
     lines.push(`\n**Round ${round.round_number}** (${round.status})`);
     for (const tip of tips) {
-      lines.push(`• ${baseUnitsToUsdt(BigInt(tip.amount_usdt))} USDT → ${tip.status}`);
+      lines.push(`• ${baseUnitsToUsdt(BigInt(tip.amount_usdt))} USD₮ → ${tip.status}`);
     }
   }
 

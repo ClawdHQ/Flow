@@ -2,7 +2,7 @@
  * WalletManager — HD wallet factory using Tether WDK (@tetherto/wdk).
  *
  * Uses @tetherto/wdk as the central orchestrator with @tetherto/wdk-wallet-evm
- * for EVM-compatible chains (Polygon, Arbitrum). Wallet derivation follows
+ * and @tetherto/wdk-wallet-tron across the supported chains. Wallet derivation follows
  * BIP-44 paths. Key material is encrypted at rest with AES-256-CBC.
  *
  * Migration from local shim:
@@ -10,15 +10,28 @@
  *   AFTER:  import WDK from '@tetherto/wdk';              // official package
  *           import WalletManagerEvm from '@tetherto/wdk-wallet-evm';
  */
+import '../config/index.js';
 import WDK from '@tetherto/wdk';
 import WalletManagerEvm from '@tetherto/wdk-wallet-evm';
+import WalletManagerTron from '@tetherto/wdk-wallet-tron';
 import crypto from 'crypto';
+import { ethers } from 'ethers';
+import {
+  getChainConfig,
+  getDefaultChain,
+  getHdPathPrefix,
+  isEvmChain,
+  normalizeChain,
+  SupportedChain,
+  SUPPORTED_CHAINS,
+} from '../config/chains.js';
 import { logger } from '../utils/logger.js';
+import { normalizeWalletAddress } from './addresses.js';
 
 export interface WalletInfo {
   address: string;
   hdPath: string;
-  chain: string;
+  chain: SupportedChain;
 }
 
 export interface TransactionResult {
@@ -28,12 +41,11 @@ export interface TransactionResult {
 }
 
 // BIP-44 path suffixes as expected by WalletManagerEvm.getAccountByPath()
-// (the m/44'/60' prefix is added internally by the EVM wallet manager)
+// or WalletManagerTron.getAccountByPath()
 const POOL_SUFFIX = "0'/0/0";
 const CREATOR_BASE_SUFFIX = "1'/0";
 const ESCROW_BASE_SUFFIX = "2'/0";
-// Full BIP-44 paths (stored in WalletInfo.hdPath for reference)
-const EVM_PREFIX = "m/44'/60'";
+const ERC20_BALANCE_OF_ABI = ['function balanceOf(address owner) view returns (uint256)'];
 
 export class WalletManager {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -51,65 +63,123 @@ export class WalletManager {
     this.wdk = this._buildWdk();
   }
 
+  private _normalizeChain(chain?: string | null): SupportedChain {
+    return normalizeChain(chain) ?? getDefaultChain();
+  }
+
+  private _getActiveRpcUrl(chain: SupportedChain): string | undefined {
+    const rpcUrl = getChainConfig(chain).rpcUrl?.trim();
+    return rpcUrl ? rpcUrl : undefined;
+  }
+
+  private _getTokenAddress(chain: SupportedChain): string | undefined {
+    const tokenAddress = getChainConfig(chain).usdtAddress?.trim();
+    return tokenAddress ? tokenAddress : undefined;
+  }
+
+  private async _getEvmTokenBalance(address: string, chain: SupportedChain): Promise<bigint> {
+    const chainConfig = getChainConfig(chain);
+    if (!chainConfig.rpcUrl || !chainConfig.usdtAddress) {
+      return 0n;
+    }
+
+    const provider = new ethers.JsonRpcProvider(
+      chainConfig.rpcUrl,
+      { chainId: chainConfig.chainId, name: chain },
+    );
+    const token = new ethers.Contract(chainConfig.usdtAddress, ERC20_BALANCE_OF_ABI, provider);
+    const normalizedAddress = normalizeWalletAddress(address, chain);
+    return await token.balanceOf(normalizedAddress) as bigint;
+  }
+
+  private _stripHdPrefix(hdPath: string, chain: SupportedChain): string {
+    const prefix = getHdPathPrefix(chain);
+    return hdPath.startsWith(`${prefix}/`)
+      ? hdPath.replace(`${prefix}/`, '')
+      : hdPath;
+  }
+
   private _buildWdk() {
     const usingTestSeed = !process.env['WDK_SEED_PHRASE'];
     if (usingTestSeed) {
       logger.warn({ module: 'wallet' }, 'WDK_SEED_PHRASE not set — using test seed. Do NOT use in production.');
     }
 
-    const rpcUrl = process.env['USE_TESTNET'] === 'true'
-      ? (process.env['POLYGON_AMOY_RPC_URL'] || undefined)
-      : (process.env['POLYGON_RPC_URL'] || undefined);
-
-    const evmConfig = rpcUrl ? { provider: rpcUrl } : {};
-
-    // Register EVM wallet for Polygon (used for pool, creator payouts, and escrow).
-    // Additional chains (Arbitrum, TRON) can be added via registerWallet() calls.
-    const wdk = new WDK(this.seedPhrase)
-      .registerWallet('polygon', WalletManagerEvm, evmConfig);
+    let wdk = new WDK(this.seedPhrase);
+    for (const chain of SUPPORTED_CHAINS) {
+      const rpcUrl = this._getActiveRpcUrl(chain);
+      const walletConfig = rpcUrl ? { provider: rpcUrl } : {};
+      const walletModule = isEvmChain(chain) ? WalletManagerEvm : WalletManagerTron;
+      wdk = wdk.registerWallet(chain, walletModule, walletConfig);
+    }
 
     logger.info({ module: 'wallet' }, 'WDK initialized');
     return wdk;
   }
 
-  /** Derive an EVM account at a BIP-44 suffix path (e.g. "0'/0/0"). */
+  /** Derive an account at a BIP-44 suffix path (e.g. "0'/0/0"). */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async _deriveAccount(suffix: string): Promise<any> {
-    return this.wdk.getAccountByPath('polygon', suffix);
+  private async _deriveAccount(chain: SupportedChain, suffix: string): Promise<any> {
+    return this.wdk.getAccountByPath(chain, suffix);
   }
 
-  async getPoolWallet(): Promise<WalletInfo> {
-    const account = await this._deriveAccount(POOL_SUFFIX);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async _getBalanceAccount(address: string, chain: SupportedChain, hdPath?: string): Promise<any> {
+    if (hdPath) {
+      return this._deriveAccount(chain, this._stripHdPrefix(hdPath, chain));
+    }
+
+    const poolWallet = await this.getPoolWallet(chain);
+    if (normalizeWalletAddress(poolWallet.address, chain) === normalizeWalletAddress(address, chain)) {
+      return this._deriveAccount(chain, POOL_SUFFIX);
+    }
+
+    throw new Error(`HD path is required to query balance for non-pool wallet ${address}`);
+  }
+
+  async getPoolWallet(chain: SupportedChain = getDefaultChain()): Promise<WalletInfo> {
+    const account = await this._deriveAccount(chain, POOL_SUFFIX);
     const address: string = await account.getAddress();
-    return { address, hdPath: `${EVM_PREFIX}/${POOL_SUFFIX}`, chain: 'polygon' };
+    return { address, hdPath: `${getHdPathPrefix(chain)}/${POOL_SUFFIX}`, chain };
   }
 
-  async getCreatorWallet(creatorIndex: number): Promise<WalletInfo> {
+  async getCreatorWallet(creatorIndex: number, chain: SupportedChain = getDefaultChain()): Promise<WalletInfo> {
     const suffix = `${CREATOR_BASE_SUFFIX}/${creatorIndex}`;
-    const account = await this._deriveAccount(suffix);
+    const account = await this._deriveAccount(chain, suffix);
     const address: string = await account.getAddress();
-    return { address, hdPath: `${EVM_PREFIX}/${suffix}`, chain: 'polygon' };
+    return { address, hdPath: `${getHdPathPrefix(chain)}/${suffix}`, chain };
   }
 
-  async createEscrowWallet(tipIndex: number): Promise<WalletInfo> {
+  async createEscrowWallet(tipIndex: number, chain: SupportedChain = getDefaultChain()): Promise<WalletInfo> {
     const suffix = `${ESCROW_BASE_SUFFIX}/${tipIndex}`;
-    const account = await this._deriveAccount(suffix);
+    const account = await this._deriveAccount(chain, suffix);
     const address: string = await account.getAddress();
-    return { address, hdPath: `${EVM_PREFIX}/${suffix}`, chain: 'polygon' };
+    return { address, hdPath: `${getHdPathPrefix(chain)}/${suffix}`, chain };
   }
 
-  async getBalance(address: string, chain: string): Promise<bigint> {
-    // When an RPC provider is configured, query on-chain USDT balance.
+  async getBalance(address: string, chain: string, hdPath?: string): Promise<bigint> {
+    // When an RPC provider is configured, query on-chain USD₮ balance.
     // In demo mode (no provider), return 0n.
     try {
-      const account = await this._deriveAccount(POOL_SUFFIX);
-      // getTokenBalance requires a connected provider
-      if (!process.env['POLYGON_RPC_URL'] && !process.env['POLYGON_AMOY_RPC_URL']) {
+      const normalizedChain = this._normalizeChain(chain);
+      const tokenAddress = this._getTokenAddress(normalizedChain);
+      if (!this._getActiveRpcUrl(normalizedChain) || !tokenAddress) {
         return 0n;
       }
-      const { getChainConfig } = await import('../config/chains.js');
-      const cfg = getChainConfig(chain as 'polygon' | 'arbitrum' | 'tron');
-      return account.getTokenBalance(cfg.usdtAddress) as Promise<bigint>;
+
+      if (isEvmChain(normalizedChain)) {
+        try {
+          return await this._getEvmTokenBalance(address, normalizedChain);
+        } catch (err) {
+          logger.warn(
+            { module: 'wallet', action: 'evm_balance_fallback', address, chain: normalizedChain, err },
+            'Direct ERC-20 USD₮ balance lookup failed, falling back to WDK.'
+          );
+        }
+      }
+
+      const account = await this._getBalanceAccount(address, normalizedChain, hdPath);
+      return await (account.getTokenBalance(tokenAddress) as Promise<bigint>);
     } catch {
       return 0n;
     }
@@ -117,30 +187,33 @@ export class WalletManager {
 
   async sendUSDT(fromPath: string, to: string, amount: bigint, chain: string): Promise<TransactionResult> {
     try {
-      // Strip the m/44'/60'/ prefix to get the suffix expected by WDK-EVM
-      const suffix = fromPath.replace(`${EVM_PREFIX}/`, '');
-      const account = await this._deriveAccount(suffix);
-      const { getChainConfig } = await import('../config/chains.js');
-      const cfg = getChainConfig(chain as 'polygon' | 'arbitrum' | 'tron');
-      // transferToken: ERC-20 transfer (USDT)
-      const result = await account.transferToken(to, cfg.usdtAddress, amount) as { hash: string };
+      const normalizedChain = this._normalizeChain(chain);
+      const tokenAddress = this._getTokenAddress(normalizedChain);
+      if (!tokenAddress) {
+        throw new Error(`USD₮ address not configured for ${normalizedChain}`);
+      }
+      const suffix = this._stripHdPrefix(fromPath, normalizedChain);
+      const account = await this._deriveAccount(normalizedChain, suffix);
+      const result = await account.transfer({
+        token: tokenAddress,
+        recipient: to,
+        amount,
+      }) as { hash: string };
       return { txHash: result.hash, success: true };
-    } catch {
+    } catch (err) {
       // In demo mode (no RPC provider configured), return a mock tx hash
       logger.warn(
-        { module: 'wallet', action: 'mock_transfer', to, amount: amount.toString(), chain },
-        '⚠️  DEMO MODE: No live RPC configured — returning mock tx hash. ' +
-        'Set POLYGON_AMOY_RPC_URL and fund the pool wallet for real transactions.'
+        { module: 'wallet', action: 'mock_transfer', to, amount: amount.toString(), chain, err },
+        '⚠️  DEMO MODE: No live RPC or USD₮ token config available — returning mock tx hash.'
       );
       return { txHash: `0xMOCK_${crypto.randomBytes(4).toString('hex')}`, success: true };
     }
   }
 
-  async signMessage(hdPath: string, message: string): Promise<string> {
-    // Strip the m/44'/60'/ prefix to get the suffix expected by WDK-EVM
-    const suffix = hdPath.replace(`${EVM_PREFIX}/`, '');
-    const account = await this._deriveAccount(suffix);
-    // WalletAccountEvm exposes .sign() for message signing
+  async signMessage(hdPath: string, message: string, chain: string = getDefaultChain()): Promise<string> {
+    const normalizedChain = this._normalizeChain(chain);
+    const suffix = this._stripHdPrefix(hdPath, normalizedChain);
+    const account = await this._deriveAccount(normalizedChain, suffix);
     return account.sign(message) as Promise<string>;
   }
 

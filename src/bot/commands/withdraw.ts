@@ -1,4 +1,5 @@
 import { Context } from 'grammy';
+import { getChainDisplayName } from '../../config/chains.js';
 import { CreatorsRepository } from '../../storage/repositories/creators.js';
 import { CreatorWalletManager } from '../../wallet/creator.js';
 import { baseUnitsToUsdt } from '../../utils/math.js';
@@ -18,7 +19,7 @@ export async function handleWithdraw(ctx: Context): Promise<void> {
 
   const balance = await creatorWallet.getBalance(creator.id);
   if (balance === 0n) {
-    await ctx.reply('💰 Your balance is 0 USDT.');
+    await ctx.reply(`💰 Your ${getChainDisplayName(creator.preferred_chain)} balance is 0 USD₮.`);
     return;
   }
 
@@ -30,7 +31,8 @@ export async function handleWithdraw(ctx: Context): Promise<void> {
       : `\n\n🔗 TX: \`${txHash}\``;
     await ctx.reply(
       `✅ Withdrawal successful!\n\n` +
-      `Amount: ${baseUnitsToUsdt(balance)} USDT\n` +
+      `Chain: ${getChainDisplayName(creator.preferred_chain)}\n` +
+      `Amount: ${baseUnitsToUsdt(balance)} USD₮\n` +
       `To: \`${creator.payout_address}\`` +
       txNote,
       { parse_mode: 'Markdown' }

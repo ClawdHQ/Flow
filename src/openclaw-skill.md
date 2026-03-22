@@ -1,6 +1,6 @@
 ---
 name: flow-tipping
-description: Quadratic tipping agent. Send USDt tips to creators on Telegram,
+description: Quadratic tipping agent. Send USD₮ tips to creators on Telegram,
   query pool health, and view leaderboards. Tips unlock quadratic matching from
   the community pool. Many small tips beat one large tip.
 ---
@@ -23,6 +23,6 @@ Parameters: `{ limit?: number }`
 Response: `{ creators: [{ username, unique_tippers, direct_tips, projected_match, score }] }`
 
 ## Notes
-- All amounts in USDT (6 decimal places internally, human-readable in responses)
+- All amounts in USD₮ (6 decimal places internally, human-readable in responses)
 - Tips expire after 30 minutes if deposit not confirmed on-chain
 - Matching pool distributes at the end of each 24-hour round

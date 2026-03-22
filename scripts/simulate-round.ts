@@ -1,6 +1,7 @@
 import dotenv from 'dotenv';
 dotenv.config();
 import { getDb } from '../src/storage/db.js';
+import { getDefaultChain } from '../src/config/chains.js';
 import { RoundsRepository } from '../src/storage/repositories/rounds.js';
 import { CreatorsRepository } from '../src/storage/repositories/creators.js';
 import { TipsRepository } from '../src/storage/repositories/tips.js';
@@ -13,6 +14,7 @@ async function simulate(): Promise<void> {
   const roundsRepo = new RoundsRepository();
   const creatorsRepo = new CreatorsRepository();
   const tipsRepo = new TipsRepository();
+  const defaultChain = getDefaultChain();
 
   // Create test round
   const roundNum = roundsRepo.getNextRoundNumber();
@@ -25,7 +27,7 @@ async function simulate(): Promise<void> {
       telegram_id: `sim_${name}`,
       username: name,
       payout_address: `0x${'0'.repeat(39)}${i + 1}`,
-      preferred_chain: 'polygon',
+      preferred_chain: defaultChain,
     })
   );
 
@@ -46,7 +48,7 @@ async function simulate(): Promise<void> {
         creator_id: scenario.creator.id,
         amount_usdt: amountBigInt.toString(),
         effective_amount: amountBigInt.toString(),
-        chain: 'polygon',
+        chain: defaultChain,
         status: 'confirmed',
         sybil_weight: 1.0,
         sybil_flagged: 0,
@@ -61,13 +63,13 @@ async function simulate(): Promise<void> {
     byCreator.set(scenario.creator.id, contribs);
   }
   const creatorContribs = Array.from(byCreator.entries()).map(([id, contributions]) => ({ id, contributions }));
-  const pool = 1_000_000_000n; // 1000 USDT
+  const pool = 1_000_000_000n; // 1000 USD₮
   const allocs = computeAllocations(creatorContribs, pool);
 
   console.log('\n📊 Allocation Results:');
   for (const alloc of allocs) {
     const creator = creatorsRepo.findById(alloc.creatorId);
-    console.log(`  @${creator?.username}: score=${alloc.score}, match=${baseUnitsToUsdt(alloc.matchAmount)} USDT`);
+    console.log(`  @${creator?.username}: score=${alloc.score}, match=${baseUnitsToUsdt(alloc.matchAmount)} USD₮`);
   }
 
   console.log('\n✅ Simulation complete!');

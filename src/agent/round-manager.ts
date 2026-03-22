@@ -1,7 +1,6 @@
 import cron from 'node-cron';
 import crypto from 'crypto';
 import { RoundsRepository } from '../storage/repositories/rounds.js';
-import { TipsRepository } from '../storage/repositories/tips.js';
 import { SybilDetector } from './sybil.js';
 import { computeRoundAllocations, AllocationPlan } from '../quadratic/allocator.js';
 import { PoolWalletManager } from '../wallet/pool.js';
@@ -11,7 +10,6 @@ import { ROUND_REVIEW_PROMPT } from './prompts.js';
 import { llmClient, getModelName } from '../utils/llm-client.js';
 
 const roundsRepo = new RoundsRepository();
-const tipsRepo = new TipsRepository();
 const sybilDetector = new SybilDetector();
 const poolWallet = new PoolWalletManager();
 
@@ -89,6 +87,10 @@ export class RoundManager {
         matchAmount: a.matchAmount.toString(),
         score: a.score.toString(),
       })),
+      poolBreakdown: plan.poolBreakdown.map(pool => ({
+        ...pool,
+        balance: pool.balance.toString(),
+      })),
       totalPool: plan.totalPool.toString(),
       totalMatched: plan.totalMatched.toString(),
     });
@@ -129,15 +131,22 @@ export class RoundManager {
     if (!round) return;
     roundsRepo.updateStatus(plan.roundId, 'executing');
     logger.info({ roundId: plan.roundId, allocations: plan.allocations.length }, 'Phase 4: Executing allocations');
+    const poolWallets = new Map<string, PoolWalletManager>();
 
     for (const alloc of plan.allocations) {
       if (alloc.matchAmount <= 0n) continue;
+      if (!alloc.walletAddress) {
+        logger.warn({ creatorId: alloc.creatorId, chain: alloc.chain }, 'Skipping allocation without wallet address');
+        continue;
+      }
       try {
-        const { unsignedTx } = await poolWallet.buildTransaction(alloc.creatorId, alloc.matchAmount);
-        const txHash = await poolWallet.executeTransaction(unsignedTx, plan.agentSignature ?? '');
-        logger.info({ creatorId: alloc.creatorId, txHash }, 'Match allocated');
+        if (!poolWallets.has(alloc.chain)) {
+          poolWallets.set(alloc.chain, new PoolWalletManager(alloc.chain));
+        }
+        const txHash = await poolWallets.get(alloc.chain)!.transferUSDT(alloc.walletAddress, alloc.matchAmount);
+        logger.info({ creatorId: alloc.creatorId, chain: alloc.chain, txHash }, 'Match allocated');
       } catch (err) {
-        logger.error({ err, creatorId: alloc.creatorId }, 'Allocation execution failed');
+        logger.error({ err, creatorId: alloc.creatorId, chain: alloc.chain }, 'Allocation execution failed');
       }
     }
   }

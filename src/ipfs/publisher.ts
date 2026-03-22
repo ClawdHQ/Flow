@@ -55,7 +55,7 @@ export async function publishRoundReport(roundId: string, allocationPlan: Alloca
   if (!round) throw new Error(`Round not found: ${roundId}`);
 
   const tips = tipsRepo.findConfirmedByRound(roundId);
-  const poolBalance = await poolWallet.getBalance();
+  const poolBalance = allocationPlan.totalPool;
   const agentAddress = await poolWallet.getAddress();
 
   const report: RoundReport = {
@@ -68,7 +68,7 @@ export async function publishRoundReport(roundId: string, allocationPlan: Alloca
       totalDirectTips: baseUnitsToUsdt(tips.reduce((s, t) => s + BigInt(t.amount_usdt), 0n)),
       totalMatched: baseUnitsToUsdt(allocationPlan.totalMatched),
       poolUsed: baseUnitsToUsdt(allocationPlan.totalMatched),
-      poolRemaining: baseUnitsToUsdt(poolBalance),
+      poolRemaining: baseUnitsToUsdt(poolBalance > allocationPlan.totalMatched ? poolBalance - allocationPlan.totalMatched : 0n),
       matchingMultiplier: round.matching_multiplier,
       sybilFlagsApplied: tips.filter(t => t.sybil_flagged).length,
     },
@@ -76,13 +76,13 @@ export async function publishRoundReport(roundId: string, allocationPlan: Alloca
       const creator = creatorsRepo.findById(a.creatorId);
       return {
         creator: creator?.username ?? a.creatorId,
-        walletAddress: creator?.accumulation_wallet_address ?? '',
+        walletAddress: a.walletAddress,
         directTips: baseUnitsToUsdt(a.directTips),
         matchAmount: baseUnitsToUsdt(a.matchAmount),
         uniqueTippers: a.uniqueTippers,
         quadraticScore: a.score.toString(),
         txHash: '',
-        chain: creator?.preferred_chain ?? 'polygon',
+        chain: a.chain,
       };
     }),
     agentAttestation: {

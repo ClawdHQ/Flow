@@ -1,9 +1,10 @@
 import { Context } from 'grammy';
+import { getChainDisplayName } from '../../config/chains.js';
 import { CreatorsRepository } from '../../storage/repositories/creators.js';
 import { TipsRepository } from '../../storage/repositories/tips.js';
 import { RoundsRepository } from '../../storage/repositories/rounds.js';
 import { EscrowWalletManager } from '../../wallet/escrow.js';
-import { SybilDetector } from '../../agent/sybil.js';
+import { watchTipDeposit } from '../tip-monitor.js';
 import { usdtToBaseUnits, baseUnitsToUsdt } from '../../utils/math.js';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../../utils/logger.js';
@@ -12,7 +13,6 @@ const creatorsRepo = new CreatorsRepository();
 const tipsRepo = new TipsRepository();
 const roundsRepo = new RoundsRepository();
 const escrowManager = new EscrowWalletManager();
-const sybilDetector = new SybilDetector();
 
 export async function handleTip(ctx: Context): Promise<void> {
   const text = ctx.message?.text ?? '';
@@ -28,7 +28,7 @@ export async function handleTip(ctx: Context): Promise<void> {
 
   const amount = parseFloat(amountStr);
   if (isNaN(amount) || amount < 1) {
-    await ctx.reply('❌ Minimum tip amount is 1 USDT.');
+    await ctx.reply('❌ Minimum tip amount is 1 USD₮.');
     return;
   }
 
@@ -45,8 +45,6 @@ export async function handleTip(ctx: Context): Promise<void> {
   }
 
   const amountBigInt = usdtToBaseUnits(amountStr);
-  const escrow = await escrowManager.createForTip(uuidv4(), amountBigInt, creator.preferred_chain);
-
   const tip = tipsRepo.create({
     tip_uuid: uuidv4(),
     round_id: round.id,
@@ -55,34 +53,40 @@ export async function handleTip(ctx: Context): Promise<void> {
     amount_usdt: amountBigInt.toString(),
     effective_amount: amountBigInt.toString(),
     chain: creator.preferred_chain,
-    escrow_address: escrow.address,
     status: 'pending',
     sybil_weight: 1.0,
     sybil_flagged: 0,
     message: message || undefined,
   });
 
+  let escrow;
+  const chatId = ctx.chat?.id ?? ctx.from?.id;
+  try {
+    escrow = await escrowManager.createForTip(tip.id, amountBigInt, creator.preferred_chain, {
+      chatId: chatId !== undefined ? String(chatId) : undefined,
+    });
+    tipsRepo.update(tip.id, {
+      escrow_address: escrow.address,
+      chain: escrow.chain,
+    });
+  } catch (err) {
+    tipsRepo.update(tip.id, { status: 'failed' });
+    logger.error({ err, tipId: tip.id, creatorId: creator.id }, 'Escrow wallet creation failed');
+    await ctx.reply('❌ Failed to create a deposit address. Please try again later.');
+    return;
+  }
+
   await ctx.reply(
     `💸 Tip initiated!\n\n` +
     `To: @${target}\n` +
-    `Amount: ${baseUnitsToUsdt(amountBigInt)} USDT\n\n` +
-    `📨 Send exactly **${baseUnitsToUsdt(amountBigInt)} USDT** to:\n\`${escrow.address}\`\n\n` +
+    `Amount: ${baseUnitsToUsdt(amountBigInt)} USD₮\n\n` +
+    `Network: ${getChainDisplayName(escrow.chain)}\n` +
+    `📨 Send exactly **${baseUnitsToUsdt(amountBigInt)} USD₮** to:\n\`${escrow.address}\`\n\n` +
     `⏳ Waiting for deposit (5 min timeout)...`,
     { parse_mode: 'Markdown' }
   );
 
-  // Background deposit confirmation
-  escrowManager.confirmDeposit(tip.id).then(async confirmed => {
-    if (confirmed) {
-      tipsRepo.update(tip.id, { status: 'confirmed', confirmed_at: new Date().toISOString() });
-      const analysis = await sybilDetector.analyzeTip(tipsRepo.findById(tip.id)!);
-      await ctx.reply(
-        `✅ Deposit confirmed!\n\nSybil weight: ${analysis.weight}\n` +
-        (analysis.flagged ? `⚠️ Flagged: ${analysis.reasons.join(', ')}` : '✅ Clean')
-      );
-    } else {
-      tipsRepo.update(tip.id, { status: 'expired' });
-      await ctx.reply('❌ Deposit not received within 5 minutes. Tip expired.');
-    }
-  }).catch(err => logger.error({ err }, 'Tip confirmation error'));
+  void watchTipDeposit(tip.id, async messageText => {
+    await ctx.reply(messageText);
+  });
 }

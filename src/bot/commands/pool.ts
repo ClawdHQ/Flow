@@ -1,18 +1,20 @@
 import { Context } from 'grammy';
-import { PoolMonitor } from '../../agent/pool-monitor.js';
-import { baseUnitsToUsdt } from '../../utils/math.js';
-
-const poolMonitor = new PoolMonitor();
+import { getChainDisplayName } from '../../config/chains.js';
+import { getPoolSnapshot } from '../../dashboard/data.js';
 
 export async function handlePool(ctx: Context): Promise<void> {
-  const report = await poolMonitor.generatePoolReport();
+  const report = await getPoolSnapshot();
+  const breakdown = report.chainBalances
+    .map(pool => `• ${getChainDisplayName(pool.chain)}: ${pool.balance} USD₮`)
+    .join('\n');
   await ctx.reply(
     `💰 **Pool Health Report**\n\n` +
-    `Balance: ${baseUnitsToUsdt(report.balance)} USDT\n` +
+    `Balance: ${report.balance} USD₮\n` +
+    `By chain:\n${breakdown}\n` +
     `Multiplier: ${report.multiplier}x\n` +
-    `Projected usage: ${baseUnitsToUsdt(report.projectedPoolUsage)} USDT/round\n` +
+    `Projected usage: ${report.projectedPoolUsage} USD₮/round\n` +
     `Rounds until depletion: ${report.roundsUntilDepletion}\n` +
-    `Total distributed: ${baseUnitsToUsdt(report.totalDistributedAllTime)} USDT`,
+    `Total distributed: ${report.totalDistributed} USD₮`,
     { parse_mode: 'Markdown' }
   );
 }

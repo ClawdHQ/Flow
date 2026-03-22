@@ -72,6 +72,25 @@ export function runMigrations(db: Database.Database): void {
       UNIQUE(address, chain)
     );
 
+    CREATE TABLE IF NOT EXISTS escrows (
+      tip_id TEXT PRIMARY KEY REFERENCES tips(id) ON DELETE CASCADE,
+      derivation_index INTEGER NOT NULL UNIQUE,
+      address TEXT NOT NULL,
+      chain TEXT NOT NULL,
+      hd_path TEXT NOT NULL,
+      expected_amount TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      chat_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT NOT NULL,
+      confirmed_at TEXT,
+      settled_at TEXT,
+      refunded_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_escrows_status_expires_at
+      ON escrows(status, expires_at);
+
     CREATE TABLE IF NOT EXISTS sybil_flags (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
       tip_id TEXT NOT NULL REFERENCES tips(id),

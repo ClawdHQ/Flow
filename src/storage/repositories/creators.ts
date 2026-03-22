@@ -56,6 +56,16 @@ export class CreatorsRepository {
     return db.prepare('SELECT * FROM creators').all() as CreatorRecord[];
   }
 
+  getIndexById(id: string): number {
+    const db = getDb();
+    const creators = db.prepare('SELECT id FROM creators ORDER BY registered_at ASC, id ASC').all() as Array<{ id: string }>;
+    const index = creators.findIndex(creator => creator.id === id);
+    if (index === -1) {
+      throw new Error(`Creator not found: ${id}`);
+    }
+    return index;
+  }
+
   count(): number {
     const db = getDb();
     const row = db.prepare('SELECT COUNT(*) as cnt FROM creators').get() as { cnt: number };

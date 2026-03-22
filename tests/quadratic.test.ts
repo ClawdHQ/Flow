@@ -19,7 +19,7 @@ describe('isqrt', () => {
 });
 
 describe('quadratic funding', () => {
-  it('100 tippers × 1 USDT beats 1 tipper × 100 USDT', () => {
+  it('100 tippers × 1 USD₮ beats 1 tipper × 100 USD₮', () => {
     const manySmall = computeQuadraticScore(Array(100).fill(1_000_000n));
     const oneLarge = computeQuadraticScore([100_000_000n]);
     expect(manySmall).toBeGreaterThan(oneLarge);

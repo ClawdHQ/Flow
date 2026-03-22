@@ -1,11 +1,17 @@
 import Database from 'better-sqlite3';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import { runMigrations } from './schema.js';
 
 let db: Database.Database | null = null;
+const projectRoot = path.dirname(fileURLToPath(new URL('../../package.json', import.meta.url)));
 
 export function getDb(): Database.Database {
   if (!db) {
-    const dbPath = process.env['DB_PATH'] ?? './flow.db';
+    const configuredPath = process.env['DB_PATH'] ?? './flow.db';
+    const dbPath = path.isAbsolute(configuredPath)
+      ? configuredPath
+      : path.resolve(projectRoot, configuredPath);
     db = new Database(dbPath);
     db.pragma('journal_mode = WAL');
     db.pragma('foreign_keys = ON');

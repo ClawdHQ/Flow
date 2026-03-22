@@ -177,8 +177,8 @@
           <div class="metric"><span class="label">Round #</span><span class="value">${r.round_number}</span></div>
           <div class="metric"><span class="label">Status</span><span>${badge(r.status)}</span></div>
           <div class="metric"><span class="label">Multiplier</span><span class="value">${r.matching_multiplier}x</span></div>
-          <div class="metric"><span class="label">Direct Tips</span><span class="value">${r.total_direct_tips} USDT</span></div>
-          <div class="metric"><span class="label">Matched</span><span class="value">${r.total_matched} USDT</span></div>
+          <div class="metric"><span class="label">Direct Tips</span><span class="value">${r.total_direct_tips} USD₮</span></div>
+          <div class="metric"><span class="label">Matched</span><span class="value">${r.total_matched} USD₮</span></div>
           <div class="metric"><span class="label">Tippers</span><span class="value">${r.tipper_count}</span></div>
           <div class="metric"><span class="label">Creators</span><span class="value">${r.creator_count}</span></div>
           <div class="metric"><span class="label">Sybil Flags</span><span class="value ${r.sybil_flags_count > 0 ? 'warn' : ''}">${r.sybil_flags_count}</span></div>
@@ -194,12 +194,12 @@
         const fillPct = Math.min(100, (bal / 10000) * 100);
         const fillClass = bal < 500 ? 'danger' : bal < 2000 ? 'warn' : '';
         document.getElementById('pool-info').innerHTML = `
-          <div class="metric"><span class="label">Balance</span><span class="value ${fillClass}">${p.balance} USDT</span></div>
+          <div class="metric"><span class="label">Balance</span><span class="value ${fillClass}">${p.balance} USD₮</span></div>
           <div class="gauge-bar"><div class="gauge-fill ${fillClass}" style="width:${fillPct}%"></div></div>
           <br>
           <div class="metric"><span class="label">Multiplier</span><span class="value">${p.multiplier}x</span></div>
           <div class="metric"><span class="label">Rounds Until Depletion</span><span class="value ${p.roundsUntilDepletion < 3 ? 'danger' : ''}">${p.roundsUntilDepletion}</span></div>
-          <div class="metric"><span class="label">Total Distributed</span><span class="value">${p.totalDistributed} USDT</span></div>
+          <div class="metric"><span class="label">Total Distributed</span><span class="value">${p.totalDistributed} USD₮</span></div>
         `;
       } catch(e) { document.getElementById('pool-info').innerHTML = '<span style="color:var(--danger)">Error loading pool</span>'; }
     }
@@ -217,7 +217,7 @@
             <span class="lb-rank">${i + 1}.</span>
             <span class="lb-name">@${entry.creator}</span>
             <div class="score-bar"><div class="score-fill" style="width:${pct}%"></div></div>
-            <span class="lb-amount">${entry.total} USDT</span>
+            <span class="lb-amount">${entry.total} USD₮</span>
             <span style="color:var(--muted);font-size:10px;width:90px;text-align:right">score: ${entry.score}</span>
           </div>`;
         });
@@ -250,7 +250,7 @@
           html += `<tr>
             <td>${r.round_number}</td>
             <td>${badge(r.status)}</td>
-            <td style="color:var(--accent)">${r.total_matched} USDT</td>
+            <td style="color:var(--accent)">${r.total_matched} USD₮</td>
             <td>${r.tipper_count}</td>
           </tr>`;
         });

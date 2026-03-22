@@ -13,9 +13,9 @@
 
 | Network | Chain ID | Use |
 |---|---|---|
-| Polygon (mainnet) | 137 | Primary USDT transfers |
+| Polygon (mainnet) | 137 | Primary USD₮ transfers |
 | Polygon Amoy (testnet) | 80002 | Development and demo |
-| Arbitrum One (mainnet) | 42161 | Secondary USDT transfers |
+| Arbitrum One (mainnet) | 42161 | Secondary USD₮ transfers |
 | Arbitrum Sepolia (testnet) | 421614 | Development and demo |
 | TRON (mainnet) | N/A | Creator payouts |
 | TRON Nile (testnet) | N/A | Development and demo |
