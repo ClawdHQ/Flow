@@ -30,7 +30,7 @@ function createLLMClient(): Anthropic | null {
       baseURL,
       defaultHeaders: {
         'HTTP-Referer': 'https://github.com/ClawdHQ/Flow',
-        'X-Title': 'FLOW Quadratic Tipping Agent',
+        'X-Title': 'FLOW on Rumble',
       },
     });
   }

@@ -1,5 +1,6 @@
 import { walletManager } from './index.js';
 import { getDefaultChain, SupportedChain } from '../config/chains.js';
+import type { SupportedToken } from '../tokens/index.js';
 import { logger } from '../utils/logger.js';
 
 export class PoolWalletManager {
@@ -16,10 +17,14 @@ export class PoolWalletManager {
   }
 
   async transferUSDT(to: string, amount: bigint): Promise<string> {
+    return this.transferToken(to, amount, 'USDT');
+  }
+
+  async transferToken(to: string, amount: bigint, token: SupportedToken): Promise<string> {
     const info = await walletManager.getPoolWallet(this.chain);
-    const result = await walletManager.sendUSDT(info.hdPath, to, amount, info.chain);
+    const result = await walletManager.sendToken(info.hdPath, to, amount, token, info.chain);
     if (!result.success) throw new Error(result.error ?? 'Pool transfer failed');
-    logger.info({ chain: this.chain, to, txHash: result.txHash }, 'Pool transfer executed');
+    logger.info({ chain: this.chain, token, to, txHash: result.txHash }, 'Pool transfer executed');
     return result.txHash;
   }
 

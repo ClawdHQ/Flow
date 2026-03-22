@@ -17,6 +17,7 @@ export interface AllocationPlan {
     matchAmount: bigint;
     score: bigint;
     uniqueTippers: number;
+    txHash?: string;
   }[];
   poolBreakdown: {
     chain: SupportedChain;
@@ -24,6 +25,7 @@ export interface AllocationPlan {
   }[];
   totalPool: bigint;
   totalMatched: bigint;
+  planHash?: string;
   agentSignature?: string;
 }
 

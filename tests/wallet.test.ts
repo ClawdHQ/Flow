@@ -162,4 +162,36 @@ describe('WalletManager', () => {
       amount: 15n,
     });
   });
+
+  it('resolves non-USDT token transfers through the token registry', async () => {
+    process.env['USE_TESTNET'] = 'false';
+    process.env['ETHEREUM_RPC_URL'] = 'https://eth.example.invalid';
+
+    const WalletManager = await loadWalletManager();
+    const manager = new WalletManager();
+    const transfer = vi.fn().mockResolvedValue({ hash: '0xtoken123' });
+    const deriveAccount = vi.fn().mockResolvedValue({ transfer });
+    (manager as unknown as {
+      _deriveAccount: typeof deriveAccount;
+    })._deriveAccount = deriveAccount;
+
+    await expect(
+      manager.sendToken("m/44'/60'/0'/0/1", '0x1234567890123456789012345678901234567890', 25n, 'XAUT', 'ethereum')
+    ).resolves.toEqual({ txHash: '0xtoken123', success: true });
+
+    expect(transfer).toHaveBeenCalledWith({
+      token: '0x68749665FF8D2d112Fa859AA293F07A622782F38',
+      recipient: '0x1234567890123456789012345678901234567890',
+      amount: 25n,
+    });
+  });
+
+  it('rejects direct BTC transfers through the wallet manager', async () => {
+    const WalletManager = await loadWalletManager();
+    const manager = new WalletManager();
+
+    await expect(
+      manager.sendToken("m/44'/60'/0'/0/1", '0x1234567890123456789012345678901234567890', 1n, 'BTC', 'ethereum')
+    ).rejects.toThrow('BTC transfers not yet supported via EVM WDK');
+  });
 });

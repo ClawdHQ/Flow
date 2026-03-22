@@ -81,7 +81,7 @@ export async function publishRoundReport(roundId: string, allocationPlan: Alloca
         matchAmount: baseUnitsToUsdt(a.matchAmount),
         uniqueTippers: a.uniqueTippers,
         quadraticScore: a.score.toString(),
-        txHash: '',
+        txHash: a.txHash ?? '',
         chain: a.chain,
       };
     }),

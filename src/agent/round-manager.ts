@@ -4,7 +4,9 @@ import { RoundsRepository } from '../storage/repositories/rounds.js';
 import { SybilDetector } from './sybil.js';
 import { computeRoundAllocations, AllocationPlan } from '../quadratic/allocator.js';
 import { PoolWalletManager } from '../wallet/pool.js';
+import { EscrowWalletManager } from '../wallet/escrow.js';
 import { publishRoundReport } from '../ipfs/publisher.js';
+import { TipsRepository } from '../storage/repositories/tips.js';
 import { logger } from '../utils/logger.js';
 import { ROUND_REVIEW_PROMPT } from './prompts.js';
 import { llmClient, getModelName } from '../utils/llm-client.js';
@@ -12,6 +14,8 @@ import { llmClient, getModelName } from '../utils/llm-client.js';
 const roundsRepo = new RoundsRepository();
 const sybilDetector = new SybilDetector();
 const poolWallet = new PoolWalletManager();
+const tipsRepo = new TipsRepository();
+const escrowWallet = new EscrowWalletManager();
 
 export class RoundManager {
   private task: cron.ScheduledTask | null = null;
@@ -43,7 +47,7 @@ export class RoundManager {
     try {
       await this.lockRound(roundId);
       await this.analyzeRound(roundId);
-      const plan = await this.signAllocationPlan(roundId);
+      const plan = await this.reviewAndSignAllocationPlan(roundId);
       await this.executeAllocations(plan);
       await this.archiveRound(roundId, plan);
       await this.resetRound();
@@ -72,13 +76,9 @@ export class RoundManager {
     await sybilDetector.batchAnalyzeRound(roundId);
   }
 
-  private async signAllocationPlan(roundId: string): Promise<AllocationPlan> {
-    roundsRepo.updateStatus(roundId, 'signing');
-    logger.info({ roundId }, 'Phase 3: Signing allocation plan');
-
+  private async reviewAndSignAllocationPlan(roundId: string): Promise<AllocationPlan> {
     const plan = await computeRoundAllocations(roundId);
 
-    // Serialize and hash the plan
     const planData = JSON.stringify({
       ...plan,
       allocations: plan.allocations.map(a => ({
@@ -94,9 +94,9 @@ export class RoundManager {
       totalPool: plan.totalPool.toString(),
       totalMatched: plan.totalMatched.toString(),
     });
-    const planHash = '0x' + crypto.createHash('sha256').update(planData).digest('hex');
 
-    // LLM review
+    roundsRepo.updateStatus(roundId, 'reviewing');
+    logger.info({ roundId }, 'Phase 3: Reviewing allocation plan');
     if (llmClient) {
       try {
         const response = await llmClient.messages.create({
@@ -118,8 +118,12 @@ export class RoundManager {
       }
     }
 
+    roundsRepo.updateStatus(roundId, 'signing');
+    logger.info({ roundId }, 'Phase 4: Signing allocation plan');
+    const planHash = '0x' + crypto.createHash('sha256').update(planData).digest('hex');
     const agentSignature = await poolWallet.signData(planHash);
     plan.agentSignature = agentSignature;
+    plan.planHash = planHash;
 
     roundsRepo.update(roundId, { plan_hash: planHash, agent_signature: agentSignature });
 
@@ -130,20 +134,48 @@ export class RoundManager {
     const round = roundsRepo.findById(plan.roundId);
     if (!round) return;
     roundsRepo.updateStatus(plan.roundId, 'executing');
-    logger.info({ roundId: plan.roundId, allocations: plan.allocations.length }, 'Phase 4: Executing allocations');
+    logger.info({ roundId: plan.roundId, allocations: plan.allocations.length }, 'Phase 5: Executing allocations');
     const poolWallets = new Map<string, PoolWalletManager>();
+    const settledTips = new Set<string>();
 
     for (const alloc of plan.allocations) {
-      if (alloc.matchAmount <= 0n) continue;
       if (!alloc.walletAddress) {
         logger.warn({ creatorId: alloc.creatorId, chain: alloc.chain }, 'Skipping allocation without wallet address');
+        continue;
+      }
+
+      const creatorTips = tipsRepo.findByCreatorAndRound(alloc.creatorId, plan.roundId)
+        .filter(tip => (tip.status === 'confirmed' || tip.status === 'settled') && Boolean(tip.escrow_address));
+
+      for (const tip of creatorTips) {
+        if (tip.status === 'settled' || tip.settlement_tx_hash || settledTips.has(tip.id)) {
+          continue;
+        }
+        try {
+          const settlementTxHash = await escrowWallet.consolidateAtRoundEnd(tip.id, alloc.walletAddress);
+          tipsRepo.update(tip.id, {
+            status: 'settled',
+            settlement_tx_hash: settlementTxHash,
+            settled_at: new Date().toISOString(),
+          });
+          settledTips.add(tip.id);
+          logger.info({ tipId: tip.id, creatorId: alloc.creatorId, settlementTxHash }, 'Escrow consolidated into creator wallet');
+        } catch (err) {
+          logger.error({ err, tipId: tip.id, creatorId: alloc.creatorId }, 'Escrow consolidation failed');
+        }
+      }
+
+      if (alloc.matchAmount <= 0n) {
         continue;
       }
       try {
         if (!poolWallets.has(alloc.chain)) {
           poolWallets.set(alloc.chain, new PoolWalletManager(alloc.chain));
         }
-        const txHash = await poolWallets.get(alloc.chain)!.transferUSDT(alloc.walletAddress, alloc.matchAmount);
+        const chainPoolWallet = poolWallets.get(alloc.chain)!;
+        const { unsignedTx } = await chainPoolWallet.buildTransaction(alloc.walletAddress, alloc.matchAmount);
+        const txHash = await chainPoolWallet.executeTransaction(unsignedTx, plan.agentSignature ?? '');
+        alloc.txHash = txHash;
         logger.info({ creatorId: alloc.creatorId, chain: alloc.chain, txHash }, 'Match allocated');
       } catch (err) {
         logger.error({ err, creatorId: alloc.creatorId, chain: alloc.chain }, 'Allocation execution failed');
@@ -153,7 +185,7 @@ export class RoundManager {
 
   private async archiveRound(roundId: string, plan: AllocationPlan): Promise<void> {
     roundsRepo.updateStatus(roundId, 'archiving');
-    logger.info({ roundId }, 'Phase 5: Archiving round');
+    logger.info({ roundId }, 'Phase 6: Archiving round');
 
     try {
       const result = await publishRoundReport(roundId, plan);
@@ -172,7 +204,7 @@ export class RoundManager {
   }
 
   private async resetRound(): Promise<void> {
-    logger.info('Phase 6: Creating new round');
+    logger.info('Phase 7: Creating new round');
     const nextNumber = roundsRepo.getNextRoundNumber();
     roundsRepo.create(nextNumber);
     logger.info({ roundNumber: nextNumber }, 'New round created');

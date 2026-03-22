@@ -25,6 +25,7 @@ import {
   SupportedChain,
   SUPPORTED_CHAINS,
 } from '../config/chains.js';
+import { getActiveTokenAddress, type SupportedToken } from '../tokens/index.js';
 import { logger } from '../utils/logger.js';
 import { normalizeWalletAddress } from './addresses.js';
 
@@ -72,9 +73,13 @@ export class WalletManager {
     return rpcUrl ? rpcUrl : undefined;
   }
 
-  private _getTokenAddress(chain: SupportedChain): string | undefined {
+  private _getUsdtAddress(chain: SupportedChain): string | undefined {
     const tokenAddress = getChainConfig(chain).usdtAddress?.trim();
     return tokenAddress ? tokenAddress : undefined;
+  }
+
+  private _getTokenAddress(token: SupportedToken, chain: SupportedChain): string | undefined {
+    return getActiveTokenAddress(token, chain);
   }
 
   private async _getEvmTokenBalance(address: string, chain: SupportedChain): Promise<bigint> {
@@ -162,7 +167,7 @@ export class WalletManager {
     // In demo mode (no provider), return 0n.
     try {
       const normalizedChain = this._normalizeChain(chain);
-      const tokenAddress = this._getTokenAddress(normalizedChain);
+      const tokenAddress = this._getUsdtAddress(normalizedChain);
       if (!this._getActiveRpcUrl(normalizedChain) || !tokenAddress) {
         return 0n;
       }
@@ -186,11 +191,19 @@ export class WalletManager {
   }
 
   async sendUSDT(fromPath: string, to: string, amount: bigint, chain: string): Promise<TransactionResult> {
+    return this.sendToken(fromPath, to, amount, 'USDT', chain);
+  }
+
+  async sendToken(fromPath: string, to: string, amount: bigint, token: SupportedToken, chain: string): Promise<TransactionResult> {
+    if (token === 'BTC') {
+      throw new Error('BTC transfers not yet supported via EVM WDK');
+    }
+
     try {
       const normalizedChain = this._normalizeChain(chain);
-      const tokenAddress = this._getTokenAddress(normalizedChain);
+      const tokenAddress = this._getTokenAddress(token, normalizedChain);
       if (!tokenAddress) {
-        throw new Error(`USD₮ address not configured for ${normalizedChain}`);
+        throw new Error(`${token} address not configured for ${normalizedChain}`);
       }
       const suffix = this._stripHdPrefix(fromPath, normalizedChain);
       const account = await this._deriveAccount(normalizedChain, suffix);
@@ -199,12 +212,25 @@ export class WalletManager {
         recipient: to,
         amount,
       }) as { hash: string };
+      logger.info(
+        {
+          module: 'wallet',
+          action: 'token_sent',
+          token,
+          txHash: result.hash,
+          fromPath,
+          to,
+          amount: amount.toString(),
+          chain: normalizedChain,
+        },
+        'Token transfer executed'
+      );
       return { txHash: result.hash, success: true };
     } catch (err) {
       // In demo mode (no RPC provider configured), return a mock tx hash
       logger.warn(
-        { module: 'wallet', action: 'mock_transfer', to, amount: amount.toString(), chain, err },
-        '⚠️  DEMO MODE: No live RPC or USD₮ token config available — returning mock tx hash.'
+        { module: 'wallet', action: 'mock_transfer', token, to, amount: amount.toString(), chain, err },
+        '⚠️  DEMO MODE: No live RPC or token config available — returning mock tx hash.'
       );
       return { txHash: `0xMOCK_${crypto.randomBytes(4).toString('hex')}`, success: true };
     }

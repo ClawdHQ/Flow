@@ -1,6 +1,7 @@
 import { walletManager, WalletInfo } from './index.js';
 import { CreatorsRepository } from '../storage/repositories/creators.js';
 import { getHdPathPrefix } from '../config/chains.js';
+import type { SupportedToken } from '../tokens/index.js';
 import { isValidWalletAddress, resolveSupportedChain } from './addresses.js';
 
 const creatorsRepo = new CreatorsRepository();
@@ -40,8 +41,12 @@ export class CreatorWalletManager {
   }
 
   async withdraw(creatorId: string, toAddress: string, amount: bigint): Promise<string> {
+    return this.withdrawToken(creatorId, toAddress, amount, 'USDT');
+  }
+
+  async withdrawToken(creatorId: string, toAddress: string, amount: bigint, token: SupportedToken): Promise<string> {
     const wallet = await this.getOrCreateWallet(creatorId);
-    const result = await walletManager.sendUSDT(wallet.hdPath, toAddress, amount, wallet.chain);
+    const result = await walletManager.sendToken(wallet.hdPath, toAddress, amount, token, wallet.chain);
     if (!result.success) throw new Error(result.error ?? 'Withdrawal failed');
     return result.txHash;
   }

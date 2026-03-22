@@ -1,5 +1,17 @@
 import type Database from 'better-sqlite3';
 
+function hasColumn(db: Database.Database, table: string, column: string): boolean {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
+  return columns.some(entry => entry.name === column);
+}
+
+function ensureColumn(db: Database.Database, table: string, column: string, definition: string): void {
+  if (hasColumn(db, table, column)) {
+    return;
+  }
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+}
+
 export function runMigrations(db: Database.Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS rounds (
@@ -109,5 +121,95 @@ export function runMigrations(db: Database.Database): void {
       multiplier REAL NOT NULL,
       snapshot_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS rumble_events (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      event_id TEXT UNIQUE NOT NULL,
+      event_type TEXT NOT NULL,
+      creator_id TEXT NOT NULL,
+      creator_handle TEXT NOT NULL,
+      video_id TEXT,
+      video_title TEXT,
+      viewer_id TEXT,
+      raw_payload TEXT NOT NULL,
+      processed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_rumble_events_creator_created
+      ON rumble_events(creator_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS rumble_creator_links (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      rumble_creator_id TEXT UNIQUE NOT NULL,
+      rumble_handle TEXT UNIQUE NOT NULL,
+      creator_id TEXT UNIQUE REFERENCES creators(id),
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      linked_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS auto_tip_rules (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      viewer_id TEXT NOT NULL,
+      creator_id TEXT REFERENCES creators(id),
+      budget_per_day_base TEXT NOT NULL,
+      tip_on_half_watch TEXT NOT NULL DEFAULT '100000',
+      tip_on_complete TEXT NOT NULL DEFAULT '250000',
+      token TEXT NOT NULL DEFAULT 'USDT',
+      chain TEXT NOT NULL DEFAULT 'polygon',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(viewer_id, creator_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS auto_tip_executions (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      rule_id TEXT REFERENCES auto_tip_rules(id),
+      viewer_id TEXT NOT NULL,
+      creator_id TEXT NOT NULL REFERENCES creators(id),
+      video_id TEXT,
+      session_id TEXT,
+      trigger_kind TEXT NOT NULL,
+      event_id TEXT,
+      amount_base TEXT NOT NULL,
+      token TEXT NOT NULL,
+      chain TEXT NOT NULL,
+      watch_percent INTEGER NOT NULL,
+      tx_hash TEXT,
+      round_id TEXT REFERENCES rounds(id),
+      executed_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_auto_tip_exec_dedupe
+      ON auto_tip_executions(viewer_id, creator_id, IFNULL(video_id, ''), IFNULL(session_id, ''), trigger_kind);
+
+    CREATE TABLE IF NOT EXISTS splits (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      creator_id TEXT UNIQUE NOT NULL REFERENCES creators(id),
+      creator_bps INTEGER NOT NULL DEFAULT 8500,
+      pool_bps INTEGER NOT NULL DEFAULT 1000,
+      protocol_bps INTEGER NOT NULL DEFAULT 100,
+      collaborators TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS milestone_bonuses (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      creator_id TEXT NOT NULL REFERENCES creators(id),
+      event_id TEXT NOT NULL REFERENCES rumble_events(event_id),
+      milestone_value INTEGER NOT NULL,
+      bonus_amount TEXT NOT NULL,
+      token TEXT NOT NULL DEFAULT 'USDT',
+      tx_hash TEXT,
+      paid_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
+
+  ensureColumn(db, 'tips', 'token', "TEXT NOT NULL DEFAULT 'USDT'");
+  ensureColumn(db, 'tips', 'amount_native', 'TEXT');
+  ensureColumn(db, 'tips', 'source', "TEXT NOT NULL DEFAULT 'manual_bot'");
+  ensureColumn(db, 'tips', 'external_event_id', 'TEXT');
+  ensureColumn(db, 'tips', 'external_actor_id', 'TEXT');
 }

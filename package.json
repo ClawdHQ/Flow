@@ -1,15 +1,19 @@
 {
   "name": "flow",
-  "version": "1.0.0",
-  "description": "FLOW — Quadratic Tipping Agent with Autonomous Matching Intelligence",
+  "version": "2.0.0",
+  "description": "FLOW — Quadratic Tipping Agent on Rumble",
   "type": "module",
   "scripts": {
-    "dev": "tsx watch src/agent/index.ts | pino-pretty",
+    "dev": "tsx src/dev/index.ts",
+    "dev:agent": "tsx watch src/agent/index.ts | pino-pretty",
+    "dev:dashboard": "tsx watch src/dashboard/server.ts",
     "build": "tsc",
     "start": "node dist/agent/index.js",
+    "start:dashboard": "node dist/dashboard/server.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "simulate": "tsx scripts/simulate-round.ts",
+    "simulate:rumble": "tsx src/rumble/simulator.ts",
     "seed-pool": "tsx scripts/seed-pool.ts",
     "dashboard": "tsx src/dashboard/server.ts"
   },

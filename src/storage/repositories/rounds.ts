@@ -4,7 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 export interface RoundRecord {
   id: string;
   round_number: number;
-  status: 'open' | 'locking' | 'analyzing' | 'signing' | 'executing' | 'archiving' | 'completed' | 'failed';
+  status: 'open' | 'locking' | 'analyzing' | 'reviewing' | 'signing' | 'executing' | 'archiving' | 'completed' | 'failed';
   started_at: string;
   ended_at?: string;
   matching_multiplier: number;

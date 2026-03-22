@@ -1,464 +1,278 @@
-# Flow
+# FLOW — Quadratic Tipping Agent on Rumble
+## Hackathon Galáctica: WDK Edition 1 | Tipping Bot Track
 
-**Quadratic Tipping Agent with Autonomous Matching Intelligence**
+Flow is a Rumble-native autonomous agent that transforms watch-time, milestones, and direct tips into programmable community support. Every qualifying contribution lands in a daily quadratic round, where broad audience participation beats concentrated whale capital.
 
-Flow is an autonomous agent that applies [quadratic funding](https://wtfisqf.com/) to Telegram-based cryptocurrency tipping. Every direct tip to a creator earns them a proportional share of a community matching pool, where the matching formula rewards breadth of support — many small tips outperform a single whale donation of equal total value.
+## One-Line Pitch
 
----
+Flow turns every viewer's watch time into a programmable tip, then quadratically multiplies community support so 1000 fans tipping $0.10 each outweigh one whale tipping $100.
 
-## Table of Contents
+## The Problem
 
-- [How It Works](#how-it-works)
-- [Features](#features)
-- [Architecture](#architecture)
-- [Prerequisites](#prerequisites)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Running Flow](#running-flow)
-- [Telegram Bot Commands](#telegram-bot-commands)
-- [Web Dashboard](#web-dashboard)
-- [Testing](#testing)
-- [Project Structure](#project-structure)
-- [Contributing](#contributing)
+Rumble already has a WDK-powered tipping wallet, but today's tipping flow is still manual and whale-biased:
 
----
+- Passive viewers rarely tip because leaving the stream to pay interrupts the moment.
+- A single $100 tip and 1000 $0.10 tips look identical in a linear system even though the community signal is completely different.
+- Matching pools need human operators to decide who gets what and when.
+- There is no programmable logic for watch-time rewards, milestone bonuses, or collaborator splits.
 
-## How It Works
+Creators with real audience breadth are undervalued by a system that cannot read community support as a signal.
 
-### Quadratic Funding Formula
+## The Solution
 
-Each creator's matching allocation is computed with integer-only arithmetic (BigInt, no floats):
+Flow sits on top of Rumble's WDK wallet as an autonomous agent layer.
 
-```
-quadratic_score(creator) = ( Σ √tip_amount_i )²
-match_allocation(creator) = pool_balance × score(creator) / Σ all_scores
-```
+### 1. Watch-Time Auto-Tips
 
-**Why this matters — equal totals, different breadth:**
+When Rumble sends `video.watch_progress` or `video.watch_completed`, Flow can fire micro-tips automatically:
 
-| Creator | Tips received | Total direct | Quadratic score |
-|---|---|---|---|
-| Alice | 10 × 1 USD₮ | 10 USD₮ | `(10 × √1)² = 100` |
-| Bob | 1 × 10 USD₮ | 10 USD₮ | `(1 × √10)² ≈ 10` |
+- 50% watch milestone: default `0.10 USD₮`
+- completion milestone: default `0.25 USD₮`
+- per-viewer daily budgets and token preferences via `/autotip`
 
-Alice and Bob both received **10 USD₮** in total, but Alice's score is 10× higher because her support came from ten independent contributors. Broad community support wins over concentrated whale donations.
+The viewer never pauses the content. The creator still gets paid. Passive watching becomes active economic participation.
 
-### Round Lifecycle
+### 2. Quadratic Matching
 
-```
-Open → Locked → Analyzed → Executed → Archived → (new round opens)
+All tip sources flow into the same 24-hour quadratic round:
+
+```text
+score(creator) = ( Σ √tip_amount_i )²
+match(creator) = pool × score / Σ all_scores
 ```
 
-1. **Open** — Tips accumulate throughout the round window (default: 24 hours).
-2. **Locked** — New tips are paused; sybil analysis runs on the accumulated tip set.
-3. **Analyzed** — Claude reviews the allocation plan for anomalies before execution.
-4. **Executed** — USD₮ transfers are sent from the pool wallet to each creator.
-5. **Archived** — Round report is published to IPFS with an agent signature for auditability.
+The engine is BigInt-safe and breadth-biased. Many small contributions outperform one large tip of the same total value.
 
-### Sybil Protection
+### 3. Autonomous Settlement
 
-Flow uses a two-layer approach:
-- **Rule-based checks** — multiple tips from the same wallet to the same creator, suspicious velocity (many tips in a short window), newly created wallets.
-- **LLM analysis** — Claude receives aggregate behavior signals and returns a confidence score and weight multiplier (1.0 = clean, 0.5 = suspicious, 0.1 = likely sybil). Tip effective amounts are scaled by this weight before the quadratic formula is applied.
+The round manager locks the round, analyzes tips, reviews the allocation plan, signs it, executes transfers, archives the report, and opens the next round without human intervention.
 
-A 3× cap prevents any single creator from receiving more in matching than three times their direct tips, protecting against edge-case allocation outliers.
+## What Makes Flow Different
 
----
-
-## Features
-
-| Feature | Description |
+| Standard Rumble Tip | Flow on Rumble |
 |---|---|
-| **Quadratic allocation** | BigInt-safe `isqrt` + `computeAllocations` engine |
-| **Autonomous round management** | Cron-scheduled rounds with configurable duration |
-| **LLM sybil detection** | Claude-powered tip analysis with per-tip weight multipliers |
-| **Multi-chain wallets** | HD derivation for Ethereum, Polygon, Arbitrum, Avalanche, Celo, and Tron via Tether WDK |
-| **Fiat on-ramp / off-ramp** | MoonPay-powered `/fiat`, `/buy`, and `/sell` flows for fiat-to-crypto and crypto-to-fiat links |
-| **Telegram bot** | Full-featured bot: register, tip, withdraw, leaderboard, history |
-| **Pool health monitor** | Every 30 minutes; dynamically adjusts matching multiplier (0.5×–2.0×) |
-| **Web dashboard** | Real-time round metrics, leaderboard, and pool status |
-| **IPFS publishing** | Immutable round reports with agent signature |
-| **SQLite storage** | Zero-dependency local database via better-sqlite3 |
+| Manual payment action | Automatic watch-time triggers |
+| Whale-biased | Community-biased quadratic matching |
+| Point-to-point transfer | Split-aware creator / pool / protocol accounting |
+| One-time value | Daily matching on top of direct support |
+| Human-managed pool ops | Autonomous round execution |
+| Single-token mental model | USD₮, XAU₮, USA₮, BTC-aware ledger |
 
----
+## Technical Architecture
 
-## Architecture
-
-```
-┌──────────────────────────────────────────────────────────┐
-│                      Telegram Bot                        │
-│          /register  /tip  /pool  /leaderboard …          │
-└───────────────────────────┬──────────────────────────────┘
-                            │
-          ┌─────────────────┼──────────────────┐
-          ▼                 ▼                  ▼
-       Tips            Wallets            Creators
-    (SQLite)         (Tether WDK         (SQLite)
-                       + ethers)
-          └─────────────────┬──────────────────┘
-                            ▼
-               ┌────────────────────────┐
-               │     SQLite Database    │
-               │  rounds · tips ·       │
-               │  creators · wallets ·  │
-               │  sybil-flags           │
-               └──────────┬─────────────┘
-                          │
-        ┌─────────────────┼────────────────┐
-        ▼                 ▼                ▼
-   PoolMonitor      RoundManager      SybilDetector
-   (every 30 min)   (daily cron)      (rules + Claude)
-        │                 │                │
-        └─────────────────┼────────────────┘
-                          ▼
-             ┌────────────────────────┐
-             │   Quadratic Allocator  │
-             │  isqrt · 3× cap ·      │
-             │  pool safety check     │
-             └──────────┬─────────────┘
-                        │
-          ┌─────────────┼─────────────┐
-          ▼             ▼             ▼
-      Pool wallet    IPFS report   Agent sig
-      (Tether WDK)  (web3.storage)  (Claude)
+```text
+Rumble Platform Events
+  (watch, milestone, super_chat, tip.completed)
+           │
+           ▼
+  POST /rumble/webhook
+  (HMAC-verified, async routed)
+           │
+     ┌─────┴──────────────────────────────────┐
+     ▼                                        ▼
+AutoTipAgent                        EventTriggerAgent
+(watch_progress → micro-tip)        (milestone → pool bonus)
+(watch_completed → bonus tip)       (super_chat → weighted tip)
+     │                              (tip.completed → mirror)
+     └─────────────┬────────────────────────────┘
+                   ▼
+         Quadratic Round Ledger
+         (SQLite · all tip sources)
+                   │
+                   ▼
+          RoundManager Agent
+    (Lock → Analyze → Review → Sign → Execute → Archive)
+                   │
+         ┌─────────┴──────────────┐
+         ▼                        ▼
+   WDK Wallet Layer          IPFS Archive
+ (@tetherto/wdk              (signed round
+  + wdk-wallet-evm)           report + agent
+  Pool · Creator · Escrow     attestation)
 ```
 
----
+## WDK Integration
 
-## Prerequisites
+Flow uses `@tetherto/wdk`, `@tetherto/wdk-wallet-evm`, and `@tetherto/wdk-wallet-tron` across its supported chains.
 
-- **Node.js** 18 or later
-- **npm** 9 or later
-- A **Telegram bot token** ([@BotFather](https://t.me/BotFather))
-- **An LLM API key**: Either Anthropic (`ANTHROPIC_API_KEY`) OR OpenRouter (`OPENROUTER_API_KEY`)
-  — OpenRouter has a free tier and supports Claude models
-- **Tether WDK seed phrase** — A 12-word BIP-39 mnemonic. Generate one with Node.js:
-  ```bash
-  node -e "const {ethers}=require('ethers');console.log(ethers.Wallet.createRandom().mnemonic.phrase)"
-  ```
-  Or use any BIP-39 generator (e.g. https://iancoleman.io/bip39/ — use offline only).
-  Set the output as `WDK_SEED_PHRASE` in your `.env`.
-  ⚠️ This controls all wallets including the matching pool. Never commit it.
-- RPC endpoint URLs for at least one supported chain (Ethereum Sepolia is the default demo path)
-- A **Web3.Storage token** for IPFS publishing (optional — set `IPFS_DISABLED=true` to skip)
+- Pool wallet: `m/44'/60'/0'/0/0`
+- Creator wallets: `m/44'/60'/1'/0/N`
+- Escrow wallets: `m/44'/60'/2'/0/N`
 
----
+The round manager signs an allocation plan hash before pool releases occur. In the demo runtime this is represented with build-and-execute pool transactions plus agent signatures, keeping the settlement path aligned with the autonomous-signing model.
 
-## LLM Provider Setup
+## OpenClaw Skill Surface
 
-Flow supports two LLM providers. You need at least one.
+The OpenClaw skill definition lives in `src/openclaw-skill.md` and exposes the main Rumble-facing capabilities:
 
-### Option A: Anthropic (Recommended)
-Get an API key at https://console.anthropic.com
-Set `ANTHROPIC_API_KEY` in your `.env` file.
+- `handle_watch_event`
+- `handle_milestone`
+- `configure_auto_tip`
+- `configure_split`
+- `tip_creator`
+- `get_pool_status`
+- `get_leaderboard`
 
-### Option B: OpenRouter (Free Tier Available)
-OpenRouter provides access to Claude and 100+ other models.
-Useful if you don't have direct Anthropic access.
+## Sybil Protection
 
-1. Sign up at https://openrouter.ai
-2. Create a key at https://openrouter.ai/keys
-3. Set in your `.env`:
-   ```
-   OPENROUTER_API_KEY=sk-or-v1-...
-   OPENROUTER_MODEL=anthropic/claude-sonnet-4
-   ```
-   Leave `ANTHROPIC_API_KEY` empty.
+Every confirmed tip runs through two layers:
 
-Recommended OpenRouter models for FLOW:
-- `anthropic/claude-sonnet-4` — Best quality (same as direct Anthropic)
-- `anthropic/claude-haiku-4` — Faster, cheaper, still great for sybil detection
-- `mistralai/mistral-large` — Good alternative if Claude credits are limited
-- `google/gemini-2.0-flash` — Fast and cheap option
+1. Rule-based checks for repeated creator targeting, abnormal velocity, and wallet-age style heuristics.
+2. LLM review for borderline cases, using Anthropic directly or OpenRouter as fallback.
 
-> Note: Free tier models on OpenRouter have rate limits. For production use,
-> add credits to your OpenRouter account.
+Tips remain visible even when suspicious, but their effective weight can be reduced before they reach the quadratic allocator.
 
----
+## Token Support
 
-## Installation
+| Token | Weight | Notes |
+|---|---|---|
+| USD₮ | 1.0× | Standard tip and auto-tip unit |
+| XAU₮ | 2.0× | Premium-weight Rumble events and transfers |
+| USA₮ | 1.0× | Registry-ready ledger token |
+| BTC | 3.0× | Mirrored prestige tips in the quadratic ledger |
+
+BTC is currently supported in mirrored Rumble-native accounting and prestige weighting; direct wallet sends remain explicitly disabled in the EVM wallet layer.
+
+## Smart Revenue Splits
+
+Flow supports creator-configurable split math:
+
+- 85% creator
+- 10% pool
+- 1% protocol
+- 4% reserved or collaborator-configurable
+
+Creators manage this with `/split`. The split engine is used by Rumble-native event ingestion today and is designed to expand further across additional settlement paths.
+
+## Agent Autonomy
+
+Each round follows the same lifecycle:
+
+```text
+LOCK     → stop intake for the closing round
+ANALYZE  → run batch sybil analysis
+REVIEW   → LLM anomaly review on the allocation plan
+SIGN     → hash plan and collect agent signature
+EXECUTE  → settle escrows and release pool matches
+ARCHIVE  → produce signed round report + IPFS metadata
+RESET    → open the next round
+```
+
+## Rumble Demo Flow
+
+```bash
+# Terminal 1
+npm run dev
+
+# Terminal 2
+npm run simulate:rumble
+```
+
+The simulator emits a judge-friendly sequence of events:
+
+- 20 viewers start watching
+- 15 hit 50% watch time
+- 10 complete the video
+- a livestream milestone triggers a pool bonus
+- 3 super chats arrive, including a premium XAU₮ event
+
+Link a creator with `/rumble connect AliceOnRumble`, then open `http://localhost:3000` to watch the event feed, auto-tip activity, and quadratic leaderboard update in real time.
+
+## Full Feature Set
+
+### Core Protocol
+
+- BigInt-safe quadratic allocator
+- Autonomous round manager
+- Pool multiplier monitoring
+- HD escrow wallets per tip
+- IPFS report publishing with agent attestation fields
+- 3× cap on match relative to direct support
+
+### Rumble Integration
+
+- HMAC-verified webhook receiver
+- watch-time auto-tip agent
+- milestone bonus agent
+- super chat mirroring with token weighting
+- Rumble-native tip mirroring
+- Rumble event simulator
+
+### Wallet Infrastructure
+
+- `@tetherto/wdk`
+- `@tetherto/wdk-wallet-evm`
+- `@tetherto/wdk-wallet-tron`
+- Ethereum, Polygon, Arbitrum, Avalanche, Celo, TRON
+- encrypted local key material
+- mock transfer hashes in demo mode when live RPC/config is missing
+
+### Intelligence
+
+- sybil detection with LLM fallback
+- round-plan review prompt before execution
+- dynamic pool multiplier based on pool health
+
+### Fiat On/Off-Ramp
+
+- MoonPay-backed `/fiat`, `/buy`, and `/sell`
+
+### Telegram Bot
+
+Current command surface:
+
+`/start` `/register` `/tip` `/deposit` `/balance` `/pool` `/round` `/rounds` `/leaderboard` `/sybil` `/history` `/withdraw` `/fiat` `/buy` `/sell` `/status` `/autotip` `/split` `/rumble`
+
+### Dashboard
+
+- live round stats
+- pool health
+- quadratic leaderboard
+- sybil monitor
+- Rumble event feed
+- auto-tip and milestone activity
+
+## Setup in 5 Minutes
 
 ```bash
 git clone https://github.com/ClawdHQ/Flow.git
 cd Flow
 npm install
-```
-
----
-
-## Configuration
-
-Copy the example environment file and fill in your values:
-
-```bash
 cp .env.example .env
-```
-
-| Variable | Required | Description |
-|---|---|---|
-| `TELEGRAM_BOT_TOKEN` | ✅ | Token from @BotFather |
-| `ANTHROPIC_API_KEY` | ✅* | Key for Claude sybil detection and round review |
-| `ANTHROPIC_MODEL` | | Claude model name (default: `claude-sonnet-4-20250514`) |
-| `OPENROUTER_API_KEY` | ✅* | OpenRouter key (alternative to Anthropic — free tier available) |
-| `OPENROUTER_MODEL` | | OpenRouter model ID (default: `anthropic/claude-sonnet-4`) |
-| `ADMIN_TELEGRAM_ID` | | Your Telegram numeric user ID — restricts `/status` to admin only |
-| `WDK_SEED_PHRASE` | ✅ | BIP-39 mnemonic for HD wallet derivation (via Tether WDK) |
-| `WDK_ENCRYPTION_KEY` | ✅ | 32+ character string used as AES-256 encryption key |
-| `MOONPAY_API_KEY` | | MoonPay publishable API key for fiat on-ramp/off-ramp |
-| `MOONPAY_SECRET_KEY` | | MoonPay secret key for signed widget URLs |
-| `MOONPAY_CACHE_TIME_MS` | | Optional MoonPay supported-currency cache duration in ms |
-| `MOONPAY_WIDGET_THEME` | | Default MoonPay widget theme: `dark` or `light` |
-| `MOONPAY_WIDGET_COLOR` | | Optional MoonPay accent color, e.g. `#1f2937` |
-| `MOONPAY_WIDGET_LANGUAGE` | | Optional widget language, e.g. `en` |
-| `MOONPAY_REDIRECT_URL` | | Optional redirect URL after MoonPay flow completion |
-| `DEFAULT_CHAIN` | | Optional default chain for bot and wallet fallbacks. Defaults to `ethereum` when `USE_TESTNET=true`, otherwise `polygon`. |
-| `USE_TESTNET` | | Set `true` to use testnet chains for demo (default: `false`) |
-| `ETHEREUM_RPC_URL` | | Ethereum mainnet RPC endpoint |
-| `ETHEREUM_SEPOLIA_RPC_URL` | | Ethereum Sepolia RPC endpoint |
-| `ETHEREUM_SEPOLIA_USDT_ADDRESS` | | Sepolia USD₮ token address if using Ethereum testnet mode. Defaults to Pimlico USD₮: `0xd077A400968890Eacc75cdc901F0356c943e4fDb` |
-| `POLYGON_RPC_URL` | | Polygon mainnet USD₮ RPC endpoint |
-| `POLYGON_AMOY_RPC_URL` | | Polygon Amoy testnet RPC (default: public endpoint) |
-| `ARBITRUM_RPC_URL` | | Arbitrum One USD₮ RPC endpoint |
-| `ARBITRUM_SEPOLIA_RPC_URL` | | Arbitrum Sepolia testnet RPC (default: public endpoint) |
-| `AVALANCHE_RPC_URL` | | Avalanche C-Chain RPC endpoint |
-| `AVALANCHE_FUJI_RPC_URL` | | Avalanche Fuji RPC endpoint |
-| `AVALANCHE_FUJI_USDT_ADDRESS` | | Fuji USD₮ token address if using Avalanche testnet mode |
-| `CELO_RPC_URL` | | Celo mainnet RPC endpoint |
-| `CELO_SEPOLIA_RPC_URL` | | Celo Sepolia RPC endpoint |
-| `CELO_SEPOLIA_USDT_ADDRESS` | | Celo Sepolia USD₮ token address if using testnet mode |
-| `TRON_RPC_URL` | | Tron USD₮ RPC endpoint |
-| `TRON_NILE_RPC_URL` | | Tron Nile RPC endpoint |
-| `WEB3_STORAGE_TOKEN` | | Token for IPFS report publishing |
-| `IPFS_DISABLED` | | Set `true` to skip IPFS upload for local demo (default: `false`) |
-| `ROUND_DURATION_HOURS` | | Length of each round in hours (default: `24`) |
-| `ROUND_CRON` | | Cron expression for round start (default: `0 0 * * *`) |
-| `MATCHING_POOL_MINIMUM` | | Minimum pool balance (USD₮) to enable matching (default: `500`) |
-| `MATCHING_POOL_BOOST_THRESHOLD` | | Pool balance above which multiplier is boosted (default: `5000`) |
-| `SYBIL_WEIGHT_THRESHOLD` | | Tips below this weight are excluded from matching (default: `0.7`) |
-| `PROTOCOL_FEE_BPS` | | Protocol fee in basis points, e.g. `100` = 1% (default: `100`) |
-| `DB_PATH` | | SQLite database file path (default: `./flow.db`) |
-| `DASHBOARD_PORT` | | Port for the web dashboard (default: `3000`) |
-| `DASHBOARD_SECRET` | | Optional bearer token to protect the dashboard API |
-
-> ✅* Either `ANTHROPIC_API_KEY` **or** `OPENROUTER_API_KEY` must be set — at least one is required.
-
-> **Security:** Never commit your `.env` file. The seed phrase controls all HD-derived wallets including the matching pool.
-
----
-
-## Running Flow
-
-### Development (auto-reload)
-
-```bash
+# Fill in TELEGRAM_BOT_TOKEN plus ANTHROPIC_API_KEY or OPENROUTER_API_KEY
+# Set WDK_SEED_PHRASE and WDK_ENCRYPTION_KEY
+# USE_TESTNET=true is the default demo path
 npm run dev
 ```
 
-Starts the agent, bot, and pool monitor in watch mode using `tsx`. Any source file change triggers an automatic restart.
-
-### Production
+Then in another terminal:
 
 ```bash
-npm run build   # compile TypeScript → dist/
-npm start       # run compiled output
+npm run simulate:rumble
 ```
 
-### Dashboard (separate process)
+For Sepolia demo balances you can use the Pimlico faucet and the configured Pimlico USD₮ test token address.
 
-```bash
-npm run dashboard
-```
+## Tech Stack
 
-Starts the Express dashboard on `DASHBOARD_PORT` (default `3000`). The main agent and the dashboard can run concurrently.
-
-### Utilities
-
-```bash
-npm run simulate    # run a test round with sample tip data (no live chain)
-npm run seed-pool   # initialize pool wallet funding
-```
-
----
-
-## Telegram Bot Commands
-
-| Command | Description |
+| Layer | Technology |
 |---|---|
-| `/start` | Welcome message and command reference |
-| `/register <wallet> [chain]` | Register as a creator with a payout wallet address. `chain` defaults to `DEFAULT_CHAIN`, which is `ethereum` in demo mode and `polygon` otherwise. |
-| `/tip @username <amount> [msg]` | Send a tip (in USD₮) to a registered creator. |
-| `/deposit` | Show your creator accumulation wallet so you can deposit USD₮ into FLOW. |
-| `/balance` | Check the current balance of your accumulation wallet. |
-| `/pool` | Show current pool balance, multiplier, and health status. |
-| `/round` | Show the current round metrics exposed by the dashboard. |
-| `/rounds [limit]` | Show recent rounds history from the dashboard (`limit` max `20`). |
-| `/leaderboard` | Display current round standings with quadratic scores. |
-| `/sybil` | Show current-round sybil flags exposed by the dashboard. |
-| `/history` | View your sent and received tip history. |
-| `/withdraw` | Withdraw accrued earnings to your registered payout address. |
-| `/fiat` | Inspect MoonPay status, supported currencies, countries, and transaction status. |
-| `/buy <crypto> <fiat> <fiat:100\|crypto:0.1> <recipient>` | Generate a MoonPay buy widget URL for fiat on-ramp. |
-| `/sell <crypto> <fiat> <crypto:0.5\|fiat:100> [refund_wallet]` | Generate a MoonPay sell widget URL for fiat off-ramp. |
-| `/status` | Show current round number, status, and total tippers. |
+| Wallet | `@tetherto/wdk` + WDK wallet modules |
+| Bot | Grammy |
+| Agent review | Anthropic / OpenRouter |
+| Storage | better-sqlite3 |
+| Dashboard API | Express |
+| Archive | Web3.Storage-compatible IPFS flow |
+| Fiat | MoonPay |
+| Logging | Pino |
+| Config | Zod |
+| Tests | Vitest |
+| Language | TypeScript |
 
----
+## Third-Party Disclosures
 
-## Web Dashboard
+See `DISCLOSURES.md` for the full list of third-party services and infrastructure.
 
-The dashboard exposes a read-only REST API for monitoring:
+## License
 
-| Endpoint | Description |
-|---|---|
-| `GET /api/round/current` | Current round data (status, totals, multiplier) |
-| `GET /api/round/leaderboard` | Creator rankings with quadratic scores |
-| `GET /api/pool` | Pool balance and health metrics |
-| `GET /api/sybil/flags` | Sybil flags for the current round |
-| `GET /api/rounds` | Last 20 completed rounds history |
-
-The dashboard enforces rate limiting (60 requests per minute per IP). Set `DASHBOARD_SECRET` to require a `Bearer` token on all endpoints.
-
----
-
-## Testing
-
-Flow uses [Vitest](https://vitest.dev/) for unit tests.
-
-```bash
-npm test           # run all tests once
-npm run test:watch # interactive watch mode
-```
-
-Tests cover:
-- **Quadratic math** (`tests/quadratic.test.ts`) — `isqrt` correctness across 0–1M, many-small vs. few-large tip scenarios, the 3× cap, pool safety invariant, and empty-round handling.
-- **Round manager** (`tests/round-manager.test.ts`) — round lifecycle state transitions and execution logic.
-- **Sybil detection** (`tests/sybil.test.ts`) — rule-based scoring accuracy.
-- **Fiat integration** (`tests/fiat.test.ts`) — MoonPay amount parsing, config gating, and widget request shaping.
-- **Wallet management** (`tests/wallet.test.ts`) — HD derivation paths and key encryption/decryption.
-
----
-
-## Project Structure
-
-```
-Flow/
-├── src/
-│   ├── agent/
-│   │   ├── index.ts            # Bootstrap: DB, bot, monitor, cron
-│   │   ├── round-manager.ts    # Round execution lifecycle
-│   │   ├── pool-monitor.ts     # Pool health checks & multiplier logic
-│   │   ├── evaluator.ts        # Tip stats and projected match calcs
-│   │   ├── sybil.ts            # Rule-based + LLM sybil detection
-│   │   └── prompts.ts          # Claude prompt templates
-│   │
-│   ├── quadratic/
-│   │   ├── index.ts            # isqrt(), computeQuadraticScore(), computeAllocations()
-│   │   ├── allocator.ts        # Round-level allocation helpers
-│   │   └── simulator.ts        # Simulation utilities
-│   │
-│   ├── wallet/
-│   │   ├── index.ts            # WalletManager (HD derivation, AES encryption)
-│   │   ├── pool.ts             # Pool wallet interface
-│   │   ├── creator.ts          # Creator wallet derivation
-│   │   ├── escrow.ts           # Per-tip escrow wallets
-│   │   └── router.ts           # Transaction routing by chain
-│   │
-│   ├── fiat/
-│   │   └── moonpay.ts          # MoonPay fiat on-ramp/off-ramp service
-│   │
-│   ├── bot/
-│   │   ├── index.ts            # Bot factory and command wiring
-│   │   ├── commands/           # One file per command handler
-│   │   └── middleware/         # Rate limiter and request logger
-│   │
-│   ├── storage/
-│   │   ├── db.ts               # better-sqlite3 initialization
-│   │   ├── schema.ts           # Table DDL and migrations
-│   │   └── repositories/       # rounds, tips, creators, wallets, sybil-flags
-│   │
-│   ├── dashboard/
-│   │   ├── server.ts           # Express API server
-│   │   └── index.html          # Dashboard frontend
-│   │
-│   ├── ipfs/
-│   │   └── publisher.ts        # Publish round reports to web3.storage
-│   │
-│   ├── config/
-│   │   ├── index.ts            # Zod env schema validation
-│   │   └── chains.ts           # Per-chain RPC and token config
-│   │
-│   ├── types/
-│   │   └── tronweb.d.ts        # Local TronWeb module typing shim
-│   │
-│   └── utils/
-│       ├── logger.ts           # Pino structured logger
-│       ├── math.ts             # USD₮ unit conversions
-│       └── retry.ts            # Exponential backoff helper
-│
-├── scripts/
-│   ├── simulate-round.ts       # End-to-end round simulation (no live chain)
-│   ├── seed-pool.ts            # Pool initialization helper
-│   └── deploy-contracts.ts     # Smart contract deployment placeholder
-│
-├── tests/
-│   ├── fiat.test.ts
-│   ├── quadratic.test.ts
-│   ├── round-manager.test.ts
-│   ├── sybil.test.ts
-│   └── wallet.test.ts
-│
-├── .env.example                # Environment variable template
-├── package.json
-└── tsconfig.json
-```
-
-### HD Wallet Derivation Paths
-
-| Wallet type | BIP-44 path |
-|---|---|
-| Matching pool | `m/44'/60'/0'/0/0` |
-| Creator payout (index *n*) | `m/44'/60'/1'/0/n` |
-| Tip escrow (index *n*) | `m/44'/60'/2'/0/n` |
-
----
-
----
-
-## Known Limitations
-
-- **Demo mode transfers**: When no live RPC is configured (e.g. during local simulation),
-  `sendUSDT()` returns a deterministic mock transaction hash instead of a real on-chain
-  transaction. All bot messages clearly indicate when demo mode is active. To enable
-  real transfers, configure the RPC and USD₮ token address for the chain you want to
-  use in `.env`, then fund the corresponding pool wallet.
-
-- **MoonPay credentials**: `/fiat`, `/buy`, and `/sell` require both
-  `MOONPAY_API_KEY` and `MOONPAY_SECRET_KEY`. Without them, FLOW will show a friendly
-  configuration message instead of creating widget URLs.
-
-- **IPFS archival**: When `IPFS_DISABLED=true` or no `WEB3_STORAGE_TOKEN` is set,
-  round reports are published with a deterministic mock CID. The signing and
-  attestation logic runs identically — only the actual IPFS upload is skipped.
-
-- **Sybil clustering detection**: The network clustering check (detecting 2-hop shared
-  funding sources) requires an archive RPC node. Standard public testnet RPCs may not
-  support `eth_getTransactionByHash` lookups for older blocks. In this case the
-  clustering check is skipped and only wallet age + velocity checks run.
-
-- **Round frequency**: The default `ROUND_CRON=0 0 * * *` runs rounds daily at midnight.
-  For demo purposes, trigger a manual round with `npm run simulate` which executes
-  the full allocation pipeline without waiting for the cron schedule.
-
-- **Single-process deployment**: The bot, round manager, and pool monitor all run in
-  one Node.js process. For production scale, these should be separated into independent
-  workers with a shared database.
-
----
-
-## Contributing
-
-1. Fork the repository and create a feature branch.
-2. Install dependencies with `npm install`.
-3. Make your changes and add or update tests as needed.
-4. Run `npm test` to verify all tests pass.
-5. Run `npm run build` to confirm there are no TypeScript errors.
-6. Open a pull request with a clear description of your change.
+Apache 2.0 — see `LICENSE`

@@ -28,6 +28,8 @@ export class SybilDetector {
   async analyzeTip(tip: TipRecord): Promise<SybilAnalysis> {
     let flagScore = 0;
     const reasons: string[] = [];
+    let llmWeight: number | undefined;
+    const isPlatformManagedTip = tip.source === 'auto_watch' || tip.source === 'rumble_native' || tip.source === 'rumble_super_chat';
 
     // Rule-based checks
     // Check velocity: tips to same creator this round
@@ -47,16 +49,18 @@ export class SybilDetector {
     }
 
     // Wallet age check (simulated - in production check chain)
-    const createdAt = new Date(tip.created_at).getTime();
-    const walletAge = Date.now() - createdAt;
-    const oneDay = 24 * 60 * 60 * 1000;
-    const sevenDays = 7 * oneDay;
-    if (walletAge < oneDay) {
-      flagScore += 0.5;
-      reasons.push('Wallet age < 1 day');
-    } else if (walletAge < sevenDays) {
-      flagScore += 0.3;
-      reasons.push('Wallet age < 7 days');
+    if (!isPlatformManagedTip) {
+      const createdAt = new Date(tip.created_at).getTime();
+      const walletAge = Date.now() - createdAt;
+      const oneDay = 24 * 60 * 60 * 1000;
+      const sevenDays = 7 * oneDay;
+      if (walletAge < oneDay) {
+        flagScore += 0.5;
+        reasons.push('Wallet age < 1 day');
+      } else if (walletAge < sevenDays) {
+        flagScore += 0.3;
+        reasons.push('Wallet age < 7 days');
+      }
     }
 
     let method: 'rule' | 'llm' = 'rule';
@@ -86,6 +90,9 @@ export class SybilDetector {
           const parsed = JSON.parse(content.text) as { confidence: number; reasoning: string; weight: number };
           flagScore = parsed.confidence;
           llmReasoning = parsed.reasoning;
+          if ([1.0, 0.5, 0.1].includes(parsed.weight)) {
+            llmWeight = parsed.weight;
+          }
           method = 'llm';
         }
       } catch (err) {
@@ -93,8 +100,8 @@ export class SybilDetector {
       }
     }
 
-    const flagged = flagScore >= this.threshold;
-    const weight = flagged ? 0.1 : 1.0;
+    const flagged = flagScore >= this.threshold || llmWeight === 0.1;
+    const weight = llmWeight ?? (flagged ? 0.1 : flagScore >= 0.3 ? 0.5 : 1.0);
 
     // Store flag
     if (flagScore > 0 || flagged) {

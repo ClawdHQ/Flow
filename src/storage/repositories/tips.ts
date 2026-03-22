@@ -1,5 +1,8 @@
 import { getDb } from '../db.js';
 import { v4 as uuidv4 } from 'uuid';
+import type { SupportedToken } from '../../tokens/index.js';
+
+export type TipSource = 'manual_bot' | 'auto_watch' | 'rumble_native' | 'rumble_super_chat' | 'milestone_bonus';
 
 export interface TipRecord {
   id: string;
@@ -11,6 +14,11 @@ export interface TipRecord {
   amount_usdt: string;
   effective_amount: string;
   chain: string;
+  token?: SupportedToken;
+  amount_native?: string;
+  source?: TipSource;
+  external_event_id?: string;
+  external_actor_id?: string;
   escrow_address?: string;
   deposit_tx_hash?: string;
   settlement_tx_hash?: string;
@@ -30,11 +38,14 @@ export class TipsRepository {
     const id = uuidv4().replace(/-/g, '');
     db.prepare(`
       INSERT INTO tips (id, tip_uuid, round_id, tipper_telegram_id, tipper_wallet_address, creator_id,
-        amount_usdt, effective_amount, chain, escrow_address, deposit_tx_hash, settlement_tx_hash,
+        amount_usdt, effective_amount, chain, token, amount_native, source, external_event_id, external_actor_id,
+        escrow_address, deposit_tx_hash, settlement_tx_hash,
         status, sybil_weight, sybil_flagged, sybil_reasons, message, confirmed_at, settled_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, data.tip_uuid, data.round_id, data.tipper_telegram_id, data.tipper_wallet_address ?? null,
       data.creator_id, data.amount_usdt, data.effective_amount, data.chain,
+      data.token ?? 'USDT', data.amount_native ?? data.amount_usdt, data.source ?? 'manual_bot',
+      data.external_event_id ?? null, data.external_actor_id ?? null,
       data.escrow_address ?? null, data.deposit_tx_hash ?? null, data.settlement_tx_hash ?? null,
       data.status, data.sybil_weight, data.sybil_flagged, data.sybil_reasons ?? null,
       data.message ?? null, data.confirmed_at ?? null, data.settled_at ?? null);
@@ -49,6 +60,11 @@ export class TipsRepository {
   findByUuid(uuid: string): TipRecord | null {
     const db = getDb();
     return db.prepare('SELECT * FROM tips WHERE tip_uuid = ?').get(uuid) as TipRecord | null;
+  }
+
+  findByExternalEventId(eventId: string): TipRecord | null {
+    const db = getDb();
+    return db.prepare('SELECT * FROM tips WHERE external_event_id = ?').get(eventId) as TipRecord | null;
   }
 
   findByRound(roundId: string): TipRecord[] {

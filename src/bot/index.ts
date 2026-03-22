@@ -14,14 +14,17 @@ import { handlePool } from './commands/pool.js';
 import { handleDeposit } from './commands/deposit.js';
 import { handleBalance } from './commands/balance.js';
 import { handleHistory } from './commands/history.js';
+import { handleAutotip } from './commands/autotip.js';
 import { handleWithdraw } from './commands/withdraw.js';
 import { handleLeaderboard } from './commands/leaderboard.js';
 import { handleRound } from './commands/round.js';
 import { handleSybil } from './commands/sybil.js';
 import { handleRounds } from './commands/rounds.js';
+import { handleRumble } from './commands/rumble.js';
 import { handleFiat } from './commands/fiat.js';
 import { handleBuy } from './commands/buy.js';
 import { handleSell } from './commands/sell.js';
+import { handleSplit } from './commands/split.js';
 import { getDefaultChain } from '../config/chains.js';
 import { getCurrentRoundSnapshot } from '../dashboard/data.js';
 import { logger } from '../utils/logger.js';
@@ -36,10 +39,13 @@ export function createBot(token: string): Bot {
   bot.command('tip', handleTip);
   bot.command('deposit', handleDeposit);
   bot.command('balance', handleBalance);
+  bot.command('autotip', handleAutotip);
   bot.command('pool', handlePool);
   bot.command('round', handleRound);
   bot.command('rounds', handleRounds);
   bot.command('history', handleHistory);
+  bot.command('rumble', handleRumble);
+  bot.command('split', handleSplit);
   bot.command('withdraw', handleWithdraw);
   bot.command('leaderboard', handleLeaderboard);
   bot.command('sybil', handleSybil);
@@ -55,7 +61,7 @@ export function createBot(token: string): Bot {
     }
     const round = getCurrentRoundSnapshot();
     await ctx.reply(
-      `🤖 **FLOW Status**\n\n` +
+      `🤖 **FLOW × Rumble Status**\n\n` +
       `Round: ${round?.round_number ?? 'none'}\n` +
       `Status: ${round?.status ?? 'idle'}\n` +
       `Tippers: ${round ? String(round.tipper_count) : '0'}\n` +
@@ -68,22 +74,34 @@ export function createBot(token: string): Bot {
   bot.command('start', async ctx => {
     const defaultChain = getDefaultChain();
     await ctx.reply(
-      `👋 Welcome to FLOW — Quadratic Tipping!\n\n` +
-      `Commands:\n` +
-      `/register <wallet> [chain] — Register as creator (default: ${defaultChain})\n` +
-      `/tip @username <amount> [msg] — Send a tip\n` +
-      `/deposit — Get your deposit wallet\n` +
-      `/balance — Check your accumulated balance\n` +
-      `/pool — Pool health\n` +
-      `/round — Current round metrics\n` +
+      `🌊 **FLOW — Quadratic Tipping Agent on Rumble**\n\n` +
+      `Flow turns Rumble watch-time, milestones, and direct tips into programmable community support.\n\n` +
+      `Core:\n` +
+      `/register <wallet> [chain] — Link your FLOW payout profile (default: ${defaultChain})\n` +
+      `/rumble connect <handle> — Link your Rumble creator identity\n` +
+      `/tip @username <amount> [msg] — Send a manual community tip\n` +
+      `/deposit — Show your creator deposit wallet\n` +
+      `/balance — Show your creator wallet balance\n\n` +
+      `Automation:\n` +
+      `/autotip [on|off] [budget] [token] — Configure viewer auto-tip rules\n` +
+      `/split — Configure creator / collaborator / pool splits\n` +
+      `/pool — Pool health and multiplier\n` +
+      `/round — Current round snapshot\n` +
       `/rounds [limit] — Recent rounds\n` +
-      `/leaderboard — Current standings\n` +
+      `/leaderboard — Quadratic score leaderboard\n` +
       `/sybil — Current sybil flags\n` +
       `/history — Your tip history\n` +
-      `/withdraw — Withdraw earnings\n` +
-      `/fiat — MoonPay fiat commands\n` +
-      `/buy — MoonPay buy link\n` +
-      `/sell — MoonPay sell link`
+      `/status — Admin runtime status\n\n` +
+      `Fiat:\n` +
+      `/fiat — MoonPay capabilities\n` +
+      `/buy — On-ramp link\n` +
+      `/sell — Off-ramp link\n\n` +
+      `Creator ops:\n` +
+      `/withdraw — Withdraw creator funds\n` +
+      `/rumble status — Linked handle and recent activity\n` +
+      `/rumble events [limit] — Recent Rumble events`
+      ,
+      { parse_mode: 'Markdown' }
     );
   });
 
