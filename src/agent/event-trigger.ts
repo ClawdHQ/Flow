@@ -1,5 +1,4 @@
 import { config } from '../config/index.js';
-import { resolveSupportedChain } from '../wallet/addresses.js';
 import { computeSplitBreakdown, getDefaultSplitConfig, type SplitConfig } from './splits.js';
 import { CreatorWalletManager } from '../wallet/creator.js';
 import { PoolWalletManager } from '../wallet/pool.js';
@@ -9,11 +8,12 @@ import { RoundsRepository } from '../storage/repositories/rounds.js';
 import { RumbleCreatorLinksRepository } from '../storage/repositories/rumble-creator-links.js';
 import { SplitsRepository } from '../storage/repositories/splits.js';
 import { TipsRepository } from '../storage/repositories/tips.js';
-import { normalizeTokenAmountToUsdtBase } from '../tokens/pricing.js';
+import { normalizeTokenAmountWithSnapshot } from '../tokens/pricing.js';
 import { getTokenWeightMultiplier, type SupportedToken } from '../tokens/index.js';
 import type { LivestreamMilestoneEvent, RumbleTipEvent, SuperChatEvent } from '../rumble/events.js';
 import { SybilDetector } from './sybil.js';
 import { logger } from '../utils/logger.js';
+import { overlayHub } from '../realtime/overlay-hub.js';
 
 export interface MilestoneBonus {
   viewerCount: number;
@@ -39,6 +39,20 @@ interface EventTriggerAgentDependencies {
   poolWalletFactory?: (chain: string) => Pick<PoolWalletManager, 'getBalance' | 'transferToken'>;
 }
 
+async function resolveCreatorDestination(
+  creatorWallet: CreatorWalletManager,
+  creatorId: string,
+): Promise<{ address: string; network: string }> {
+  const payoutCapable = creatorWallet as CreatorWalletManager & {
+    getPayoutDestination?: (creatorId: string) => Promise<{ address: string; network: string }>;
+  };
+  if (typeof payoutCapable.getPayoutDestination === 'function') {
+    return payoutCapable.getPayoutDestination(creatorId);
+  }
+  const wallet = await creatorWallet.getOrCreateWallet(creatorId);
+  return { address: wallet.address, network: wallet.chain };
+}
+
 export class EventTriggerAgent {
   private readonly rumbleLinksRepo: RumbleCreatorLinksRepository;
   private readonly creatorsRepo: CreatorsRepository;
@@ -59,7 +73,7 @@ export class EventTriggerAgent {
     this.splitsRepo = dependencies.splitsRepo ?? new SplitsRepository();
     this.creatorWallet = dependencies.creatorWallet ?? new CreatorWalletManager();
     this.sybilDetector = dependencies.sybilDetector ?? new SybilDetector();
-    this.poolWalletFactory = dependencies.poolWalletFactory ?? (chain => new PoolWalletManager(resolveSupportedChain(chain)));
+    this.poolWalletFactory = dependencies.poolWalletFactory ?? (() => new PoolWalletManager());
   }
 
   async handleMilestone(event: LivestreamMilestoneEvent): Promise<void> {
@@ -81,15 +95,15 @@ export class EventTriggerAgent {
       return;
     }
 
-    const wallet = await this.creatorWallet.getOrCreateWallet(creator.id);
-    const poolWallet = this.poolWalletFactory(wallet.chain);
+    const destination = await resolveCreatorDestination(this.creatorWallet, creator.id);
+    const poolWallet = this.poolWalletFactory(destination.network);
     const poolBalance = await poolWallet.getBalance();
     if (poolBalance < milestone.bonusUsdt) {
       logger.warn({ creatorId: creator.id, bonus: milestone.bonusUsdt.toString() }, 'Skipping milestone bonus because pool balance is too low');
       return;
     }
 
-    const txHash = await poolWallet.transferToken(wallet.address, milestone.bonusUsdt, 'USDT');
+    const txHash = await poolWallet.transferToken(destination.address, milestone.bonusUsdt, 'USDT');
     this.milestoneBonusesRepo.create({
       creator_id: creator.id,
       event_id: event.event_id,
@@ -103,6 +117,17 @@ export class EventTriggerAgent {
       { creatorId: creator.id, milestone: event.milestone_value, txHash },
       'Milestone bonus released'
     );
+    overlayHub.publish({
+      type: 'milestone',
+      creatorId: creator.id,
+      creatorHandle: event.creator_rumble_handle,
+      title: `Milestone ${event.milestone_value} hit`,
+      subtitle: 'Pool bonus released',
+      amount: milestone.bonusUsdt.toString(),
+      token: 'USDT',
+      txHash,
+      createdAt: new Date().toISOString(),
+    });
   }
 
   async handleSuperChat(event: SuperChatEvent): Promise<void> {
@@ -114,6 +139,7 @@ export class EventTriggerAgent {
     if (!creator || !round) {
       return;
     }
+    const destination = await resolveCreatorDestination(this.creatorWallet, creator.id);
 
     const normalizedAmount = BigInt(event.amount_usd_cents) * 10_000n;
     const weighted = this.applyTokenWeight(normalizedAmount, event.token);
@@ -127,7 +153,7 @@ export class EventTriggerAgent {
       amount_usdt: normalizedAmount.toString(),
       amount_native: normalizedAmount.toString(),
       effective_amount: weighted.toString(),
-      chain: creator.preferred_chain,
+      chain: destination.network,
       token: event.token,
       source: 'rumble_super_chat',
       external_event_id: event.event_id,
@@ -150,6 +176,16 @@ export class EventTriggerAgent {
       },
       'Mirrored Rumble super chat into Flow ledger'
     );
+    overlayHub.publish({
+      type: 'tip',
+      creatorId: creator.id,
+      creatorHandle: event.creator_rumble_handle,
+      title: 'Super chat mirrored',
+      subtitle: event.message,
+      amount: normalizedAmount.toString(),
+      token: event.token,
+      createdAt: new Date().toISOString(),
+    });
   }
 
   async handleRumbleTip(event: RumbleTipEvent): Promise<void> {
@@ -161,9 +197,11 @@ export class EventTriggerAgent {
     if (!creator || !round) {
       return;
     }
+    const destination = await resolveCreatorDestination(this.creatorWallet, creator.id);
 
     const nativeAmount = BigInt(event.amount_base_units);
-    const normalizedAmount = await normalizeTokenAmountToUsdtBase(nativeAmount, event.token);
+    const normalized = await normalizeTokenAmountWithSnapshot(nativeAmount, event.token);
+    const normalizedAmount = normalized.normalizedAmount;
     const weighted = this.applyTokenWeight(normalizedAmount, event.token);
     const split = this.getSplitConfig(creator.id);
     const breakdown = computeSplitBreakdown(normalizedAmount, split);
@@ -175,11 +213,12 @@ export class EventTriggerAgent {
       amount_usdt: normalizedAmount.toString(),
       amount_native: nativeAmount.toString(),
       effective_amount: weighted.toString(),
-      chain: creator.preferred_chain,
+      chain: destination.network,
       token: event.token,
       source: 'rumble_native',
       external_event_id: event.event_id,
       external_actor_id: event.viewer_id,
+      price_rate_snapshot_id: normalized.snapshotId,
       deposit_tx_hash: event.tx_hash,
       status: 'confirmed',
       sybil_weight: 1.0,
@@ -199,6 +238,17 @@ export class EventTriggerAgent {
       },
       'Mirrored Rumble native tip into Flow ledger'
     );
+    overlayHub.publish({
+      type: 'tip',
+      creatorId: creator.id,
+      creatorHandle: event.creator_rumble_handle,
+      title: 'Rumble native tip mirrored',
+      subtitle: `${event.viewer_id} supported the stream`,
+      amount: normalizedAmount.toString(),
+      token: event.token,
+      txHash: event.tx_hash,
+      createdAt: new Date().toISOString(),
+    });
   }
 
   configureSplit(creatorId: string, split: SplitConfig): SplitConfig {

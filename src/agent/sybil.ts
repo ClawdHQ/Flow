@@ -11,10 +11,12 @@ export interface SybilAnalysis {
   tipId: string;
   tipperId: string;
   flagScore: number;
+  confidence: number;
   weight: number;
   flagged: boolean;
   reasons: string[];
   method: 'rule' | 'llm';
+  reasoning?: string;
   analyzedAt: string;
 }
 
@@ -29,6 +31,7 @@ export class SybilDetector {
     let flagScore = 0;
     const reasons: string[] = [];
     let llmWeight: number | undefined;
+    let confidence = flagScore;
     const isPlatformManagedTip = tip.source === 'auto_watch' || tip.source === 'rumble_native' || tip.source === 'rumble_super_chat';
 
     // Rule-based checks
@@ -89,6 +92,7 @@ export class SybilDetector {
         if (content && content.type === 'text') {
           const parsed = JSON.parse(content.text) as { confidence: number; reasoning: string; weight: number };
           flagScore = parsed.confidence;
+          confidence = parsed.confidence;
           llmReasoning = parsed.reasoning;
           if ([1.0, 0.5, 0.1].includes(parsed.weight)) {
             llmWeight = parsed.weight;
@@ -100,7 +104,8 @@ export class SybilDetector {
       }
     }
 
-    const flagged = flagScore >= this.threshold || llmWeight === 0.1;
+    confidence = confidence || flagScore;
+    const flagged = confidence >= this.threshold || llmWeight === 0.1;
     const weight = llmWeight ?? (flagged ? 0.1 : flagScore >= 0.3 ? 0.5 : 1.0);
 
     // Store flag
@@ -108,6 +113,7 @@ export class SybilDetector {
       flagsRepo.create({
         tip_id: tip.id,
         flag_score: flagScore,
+        confidence,
         weight,
         method,
         reasons: JSON.stringify(reasons),
@@ -120,16 +126,20 @@ export class SybilDetector {
       sybil_weight: weight,
       sybil_flagged: flagged ? 1 : 0,
       sybil_reasons: reasons.length > 0 ? JSON.stringify(reasons) : undefined,
+      sybil_confidence: confidence,
+      sybil_reasoning: llmReasoning,
     });
 
     return {
       tipId: tip.id,
       tipperId: tip.tipper_telegram_id,
       flagScore,
+      confidence,
       weight,
       flagged,
       reasons,
       method,
+      reasoning: llmReasoning,
       analyzedAt: new Date().toISOString(),
     };
   }

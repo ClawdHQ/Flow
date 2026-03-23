@@ -30,9 +30,9 @@ export async function simulateCurrentRound(): Promise<SimulationResult> {
     return {
       creatorId: a.creatorId,
       username: creator?.username ?? 'unknown',
-      chain: a.chain,
-      directTips: a.directTips,
-      projectedMatch: a.matchAmount,
+      chain: (a.payoutNetwork as SupportedChain) ?? 'polygon',
+      directTips: BigInt(a.directTips),
+      projectedMatch: BigInt(a.matchAmount),
       uniqueTippers: a.uniqueTippers,
     };
   });
@@ -40,7 +40,7 @@ export async function simulateCurrentRound(): Promise<SimulationResult> {
   return {
     roundId: round.id,
     projectedAllocations,
-    poolBalance: plan.totalPool,
+    poolBalance: BigInt(plan.totalPool),
     multiplier: round.matching_multiplier,
   };
 }

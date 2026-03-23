@@ -4,25 +4,30 @@ import { RoundsRepository } from '../storage/repositories/rounds.js';
 import { SybilDetector } from './sybil.js';
 import { computeRoundAllocations, AllocationPlan } from '../quadratic/allocator.js';
 import { PoolWalletManager } from '../wallet/pool.js';
-import { EscrowWalletManager } from '../wallet/escrow.js';
 import { publishRoundReport } from '../ipfs/publisher.js';
-import { TipsRepository } from '../storage/repositories/tips.js';
 import { logger } from '../utils/logger.js';
 import { ROUND_REVIEW_PROMPT } from './prompts.js';
 import { llmClient, getModelName } from '../utils/llm-client.js';
+import { canonicalJson } from '../utils/canonical-json.js';
+import { RoundAllocationsRepository } from '../storage/repositories/round-allocations.js';
+import { BridgeTransfersRepository } from '../storage/repositories/bridge-transfers.js';
+import { SettlementExecutionsRepository } from '../storage/repositories/settlement-executions.js';
+import { settlementNotifier } from '../notifications/settlement-notifier.js';
+import { overlayHub } from '../realtime/overlay-hub.js';
 
 const roundsRepo = new RoundsRepository();
 const sybilDetector = new SybilDetector();
 const poolWallet = new PoolWalletManager();
-const tipsRepo = new TipsRepository();
-const escrowWallet = new EscrowWalletManager();
+const roundAllocationsRepo = new RoundAllocationsRepository();
+const bridgeTransfersRepo = new BridgeTransfersRepository();
+const settlementExecutionsRepo = new SettlementExecutionsRepository();
+
+function hashCanonical(value: unknown): string {
+  return '0x' + crypto.createHash('sha256').update(canonicalJson(value)).digest('hex');
+}
 
 export class RoundManager {
   private task: cron.ScheduledTask | null = null;
-
-  constructor() {
-    // llmClient is initialized at module load in utils/llm-client.ts
-  }
 
   start(): void {
     const cronExpr = process.env['ROUND_CRON'] ?? '0 0 * * *';
@@ -78,22 +83,12 @@ export class RoundManager {
 
   private async reviewAndSignAllocationPlan(roundId: string): Promise<AllocationPlan> {
     const plan = await computeRoundAllocations(roundId);
-
-    const planData = JSON.stringify({
+    const planToReview = {
       ...plan,
-      allocations: plan.allocations.map(a => ({
-        ...a,
-        directTips: a.directTips.toString(),
-        matchAmount: a.matchAmount.toString(),
-        score: a.score.toString(),
-      })),
-      poolBreakdown: plan.poolBreakdown.map(pool => ({
-        ...pool,
-        balance: pool.balance.toString(),
-      })),
-      totalPool: plan.totalPool.toString(),
-      totalMatched: plan.totalMatched.toString(),
-    });
+      signatures: { planHash: '', planSignature: '' },
+      executionReceipts: [],
+    };
+    const planData = canonicalJson(planToReview);
 
     roundsRepo.updateStatus(roundId, 'reviewing');
     logger.info({ roundId }, 'Phase 3: Reviewing allocation plan');
@@ -120,65 +115,127 @@ export class RoundManager {
 
     roundsRepo.updateStatus(roundId, 'signing');
     logger.info({ roundId }, 'Phase 4: Signing allocation plan');
-    const planHash = '0x' + crypto.createHash('sha256').update(planData).digest('hex');
-    const agentSignature = await poolWallet.signData(planHash);
-    plan.agentSignature = agentSignature;
-    plan.planHash = planHash;
+    const planHash = hashCanonical(planToReview);
+    const planSignature = await poolWallet.signData(planHash);
+    plan.signatures.planHash = planHash;
+    plan.signatures.planSignature = planSignature;
 
-    roundsRepo.update(roundId, { plan_hash: planHash, agent_signature: agentSignature });
+    roundAllocationsRepo.replaceForRound(roundId, plan.allocations.map(allocation => ({
+      creator_id: allocation.creatorId,
+      payout_address: allocation.payoutAddress,
+      payout_family: allocation.payoutFamily,
+      payout_network: allocation.payoutNetwork,
+      payout_token: allocation.payoutToken,
+      direct_tips: allocation.directTips,
+      match_amount: allocation.matchAmount,
+      score: allocation.score,
+      unique_tippers: allocation.uniqueTippers,
+      settlement_mode: allocation.settlementMode,
+      tx_hash: allocation.txHash,
+    })));
+
+    roundsRepo.update(roundId, {
+      plan_hash: planHash,
+      agent_signature: planSignature,
+      plan_signature: planSignature,
+      plan_json: canonicalJson(plan),
+      pool_wallet_address: plan.poolAddress,
+    });
 
     return plan;
   }
 
   private async executeAllocations(plan: AllocationPlan): Promise<void> {
-    const round = roundsRepo.findById(plan.roundId);
-    if (!round) return;
     roundsRepo.updateStatus(plan.roundId, 'executing');
     logger.info({ roundId: plan.roundId, allocations: plan.allocations.length }, 'Phase 5: Executing allocations');
-    const poolWallets = new Map<string, PoolWalletManager>();
-    const settledTips = new Set<string>();
 
-    for (const alloc of plan.allocations) {
-      if (!alloc.walletAddress) {
-        logger.warn({ creatorId: alloc.creatorId, chain: alloc.chain }, 'Skipping allocation without wallet address');
-        continue;
-      }
+    for (const bridgeAction of plan.bridgeActions) {
+      bridgeTransfersRepo.create({
+        round_id: plan.roundId,
+        creator_id: bridgeAction.creatorId,
+        source_network: bridgeAction.sourceNetwork,
+        destination_network: bridgeAction.destinationNetwork,
+        token: bridgeAction.token,
+        amount: bridgeAction.amount,
+        status: bridgeAction.status,
+        approve_hash: bridgeAction.approveHash,
+        tx_hash: bridgeAction.hash,
+        reset_allowance_hash: bridgeAction.resetAllowanceHash,
+      });
+    }
 
-      const creatorTips = tipsRepo.findByCreatorAndRound(alloc.creatorId, plan.roundId)
-        .filter(tip => (tip.status === 'confirmed' || tip.status === 'settled') && Boolean(tip.escrow_address));
-
-      for (const tip of creatorTips) {
-        if (tip.status === 'settled' || tip.settlement_tx_hash || settledTips.has(tip.id)) {
-          continue;
-        }
-        try {
-          const settlementTxHash = await escrowWallet.consolidateAtRoundEnd(tip.id, alloc.walletAddress);
-          tipsRepo.update(tip.id, {
-            status: 'settled',
-            settlement_tx_hash: settlementTxHash,
-            settled_at: new Date().toISOString(),
-          });
-          settledTips.add(tip.id);
-          logger.info({ tipId: tip.id, creatorId: alloc.creatorId, settlementTxHash }, 'Escrow consolidated into creator wallet');
-        } catch (err) {
-          logger.error({ err, tipId: tip.id, creatorId: alloc.creatorId }, 'Escrow consolidation failed');
-        }
-      }
-
-      if (alloc.matchAmount <= 0n) {
+    for (const [index, allocation] of plan.allocations.entries()) {
+      if (BigInt(allocation.matchAmount) <= 0n) {
         continue;
       }
       try {
-        if (!poolWallets.has(alloc.chain)) {
-          poolWallets.set(alloc.chain, new PoolWalletManager(alloc.chain));
-        }
-        const chainPoolWallet = poolWallets.get(alloc.chain)!;
-        const { unsignedTx } = await chainPoolWallet.buildTransaction(alloc.walletAddress, alloc.matchAmount);
-        const txHash = await chainPoolWallet.executeTransaction(unsignedTx, plan.agentSignature ?? '');
-        alloc.txHash = txHash;
-        logger.info({ creatorId: alloc.creatorId, chain: alloc.chain, txHash }, 'Match allocated');
+        const { unsignedTx } = await poolWallet.buildTransaction(allocation.payoutAddress, BigInt(allocation.matchAmount), {
+          planHash: plan.signatures.planHash,
+          allocationIndex: index,
+          creatorId: allocation.creatorId,
+        });
+        await poolWallet.executeTransaction(unsignedTx, plan.signatures.planSignature);
+
+        const payoutResult = await poolWallet.settlePayout({
+          network: allocation.payoutNetwork,
+          token: allocation.payoutToken,
+          address: allocation.payoutAddress,
+        }, BigInt(allocation.matchAmount));
+
+        allocation.txHash = payoutResult.txHash;
+        plan.executionReceipts.push({
+          allocationIndex: index,
+          creatorId: allocation.creatorId,
+          mode: payoutResult.mode === 'bridge' ? 'bridge' : 'direct',
+          txHash: payoutResult.txHash,
+          approveHash: payoutResult.approveHash,
+          resetAllowanceHash: payoutResult.resetAllowanceHash,
+          status: 'completed',
+        });
+
+        settlementExecutionsRepo.create({
+          round_id: plan.roundId,
+          allocation_index: index,
+          creator_id: allocation.creatorId,
+          mode: payoutResult.mode,
+          status: 'completed',
+          tx_hash: payoutResult.txHash,
+          approve_hash: payoutResult.approveHash,
+          reset_allowance_hash: payoutResult.resetAllowanceHash,
+          error: undefined,
+        });
+
+        overlayHub.publish({
+          type: 'settlement',
+          creatorId: allocation.creatorId,
+          title: 'Settlement completed',
+          subtitle: `${allocation.creatorUsername} received their round payout`,
+          amount: allocation.matchAmount,
+          token: allocation.payoutToken,
+          txHash: payoutResult.txHash,
+          createdAt: new Date().toISOString(),
+        });
       } catch (err) {
-        logger.error({ err, creatorId: alloc.creatorId, chain: alloc.chain }, 'Allocation execution failed');
+        const error = err instanceof Error ? err.message : 'Allocation execution failed';
+        plan.executionReceipts.push({
+          allocationIndex: index,
+          creatorId: allocation.creatorId,
+          mode: allocation.settlementMode,
+          status: 'failed',
+          error,
+        });
+        settlementExecutionsRepo.create({
+          round_id: plan.roundId,
+          allocation_index: index,
+          creator_id: allocation.creatorId,
+          mode: allocation.settlementMode,
+          status: 'failed',
+          tx_hash: undefined,
+          approve_hash: undefined,
+          reset_allowance_hash: undefined,
+          error,
+        });
+        logger.error({ err, creatorId: allocation.creatorId }, 'Allocation execution failed');
       }
     }
   }
@@ -187,17 +244,27 @@ export class RoundManager {
     roundsRepo.updateStatus(roundId, 'archiving');
     logger.info({ roundId }, 'Phase 6: Archiving round');
 
-    try {
-      const result = await publishRoundReport(roundId, plan);
-      roundsRepo.update(roundId, {
-        ipfs_cid: result.cid,
-        ipfs_url: result.url,
-        total_matched: plan.totalMatched.toString(),
-        pool_used: plan.totalMatched.toString(),
-        ended_at: new Date().toISOString(),
+    const result = await publishRoundReport(roundId, plan);
+    plan.signatures.reportCid = result.cid;
+    plan.signatures.cidSignature = result.cidSignature;
+
+    roundsRepo.update(roundId, {
+      ipfs_cid: result.cid,
+      ipfs_url: result.url,
+      total_matched: plan.totalMatched,
+      pool_used: plan.totalMatched,
+      ended_at: new Date().toISOString(),
+      cid_signature: result.cidSignature,
+      plan_json: canonicalJson(plan),
+    });
+
+    for (const allocation of plan.allocations.filter(entry => entry.txHash)) {
+      await settlementNotifier.notifyCreatorSettlement({
+        creatorId: allocation.creatorId,
+        roundId,
+        txHash: allocation.txHash!,
+        reportUrl: result.url,
       });
-    } catch (err) {
-      logger.warn({ err }, 'IPFS publish failed, continuing');
     }
 
     roundsRepo.updateStatus(roundId, 'completed');

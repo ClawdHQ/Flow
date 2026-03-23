@@ -107,6 +107,7 @@ export function runMigrations(db: Database.Database): void {
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
       tip_id TEXT NOT NULL REFERENCES tips(id),
       flag_score REAL NOT NULL,
+      confidence REAL,
       weight REAL NOT NULL,
       method TEXT NOT NULL,
       reasons TEXT NOT NULL,
@@ -205,6 +206,173 @@ export function runMigrations(db: Database.Database): void {
       tx_hash TEXT,
       paid_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS wallet_accounts (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      address TEXT NOT NULL,
+      family TEXT NOT NULL,
+      network TEXT NOT NULL,
+      role TEXT NOT NULL,
+      derivation_path TEXT,
+      capability_json TEXT NOT NULL DEFAULT '{}',
+      reference_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(address, family, network, role)
+    );
+
+    CREATE TABLE IF NOT EXISTS creator_admin_wallets (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      creator_id TEXT NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+      family TEXT NOT NULL,
+      network TEXT NOT NULL,
+      address TEXT NOT NULL,
+      auth_method TEXT NOT NULL,
+      public_key TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(creator_id, family, network, address)
+    );
+
+    CREATE TABLE IF NOT EXISTS payout_destinations (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      creator_id TEXT NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+      family TEXT NOT NULL,
+      network TEXT NOT NULL,
+      token TEXT NOT NULL,
+      address TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(creator_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS creator_overlay_settings (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      creator_id TEXT NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+      rumble_handle TEXT,
+      theme TEXT NOT NULL DEFAULT 'gold',
+      position TEXT NOT NULL DEFAULT 'bottom-left',
+      show_tip_alerts INTEGER NOT NULL DEFAULT 1,
+      show_pool_bar INTEGER NOT NULL DEFAULT 1,
+      show_leaderboard INTEGER NOT NULL DEFAULT 1,
+      accent_color TEXT,
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(creator_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS rate_snapshots (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      token TEXT NOT NULL,
+      quote_token TEXT NOT NULL DEFAULT 'USDT',
+      rate TEXT NOT NULL,
+      source TEXT NOT NULL,
+      captured_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS round_allocations (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      round_id TEXT NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+      creator_id TEXT NOT NULL REFERENCES creators(id),
+      payout_address TEXT NOT NULL,
+      payout_family TEXT NOT NULL,
+      payout_network TEXT NOT NULL,
+      payout_token TEXT NOT NULL,
+      direct_tips TEXT NOT NULL,
+      match_amount TEXT NOT NULL,
+      score TEXT NOT NULL,
+      unique_tippers INTEGER NOT NULL DEFAULT 0,
+      settlement_mode TEXT NOT NULL,
+      tx_hash TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS bridge_transfers (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      round_id TEXT REFERENCES rounds(id) ON DELETE CASCADE,
+      creator_id TEXT REFERENCES creators(id),
+      source_network TEXT NOT NULL,
+      destination_network TEXT NOT NULL,
+      token TEXT NOT NULL,
+      amount TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'planned',
+      approve_hash TEXT,
+      tx_hash TEXT,
+      reset_allowance_hash TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS settlement_executions (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      round_id TEXT NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+      allocation_index INTEGER NOT NULL,
+      creator_id TEXT NOT NULL REFERENCES creators(id),
+      mode TEXT NOT NULL,
+      status TEXT NOT NULL,
+      tx_hash TEXT,
+      approve_hash TEXT,
+      reset_allowance_hash TEXT,
+      error TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS report_attestations (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      round_id TEXT NOT NULL REFERENCES rounds(id) ON DELETE CASCADE,
+      plan_hash TEXT NOT NULL,
+      plan_signature TEXT NOT NULL,
+      report_cid TEXT,
+      cid_signature TEXT,
+      agent_wallet_address TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS telegram_notifications (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      creator_id TEXT NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+      round_id TEXT REFERENCES rounds(id) ON DELETE CASCADE,
+      telegram_id TEXT NOT NULL,
+      message TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      tx_hash TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      sent_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_challenges (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      family TEXT NOT NULL,
+      address TEXT NOT NULL,
+      network TEXT NOT NULL,
+      challenge TEXT NOT NULL,
+      nonce TEXT NOT NULL,
+      host TEXT NOT NULL,
+      payload_json TEXT,
+      expires_at TEXT NOT NULL,
+      consumed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS auth_sessions (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      creator_id TEXT NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
+      family TEXT NOT NULL,
+      address TEXT NOT NULL,
+      token TEXT NOT NULL UNIQUE,
+      expires_at TEXT NOT NULL,
+      revoked_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS wdk_operation_logs (
+      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+      operation_type TEXT NOT NULL,
+      family TEXT NOT NULL,
+      network TEXT NOT NULL,
+      reference_id TEXT,
+      request_json TEXT,
+      response_json TEXT,
+      status TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 
   ensureColumn(db, 'tips', 'token', "TEXT NOT NULL DEFAULT 'USDT'");
@@ -212,4 +380,14 @@ export function runMigrations(db: Database.Database): void {
   ensureColumn(db, 'tips', 'source', "TEXT NOT NULL DEFAULT 'manual_bot'");
   ensureColumn(db, 'tips', 'external_event_id', 'TEXT');
   ensureColumn(db, 'tips', 'external_actor_id', 'TEXT');
+  ensureColumn(db, 'tips', 'price_rate_snapshot_id', 'TEXT');
+  ensureColumn(db, 'tips', 'sybil_confidence', 'REAL');
+  ensureColumn(db, 'tips', 'sybil_reasoning', 'TEXT');
+  ensureColumn(db, 'rounds', 'plan_json', 'TEXT');
+  ensureColumn(db, 'rounds', 'plan_signature', 'TEXT');
+  ensureColumn(db, 'rounds', 'cid_signature', 'TEXT');
+  ensureColumn(db, 'rounds', 'pool_wallet_address', 'TEXT');
+  ensureColumn(db, 'sybil_flags', 'confidence', 'REAL');
+  ensureColumn(db, 'creators', 'profile_bio', 'TEXT');
+  ensureColumn(db, 'creators', 'status_badges_json', 'TEXT');
 }

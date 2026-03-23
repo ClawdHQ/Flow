@@ -1,23 +1,28 @@
 import { config } from '../config/index.js';
 import { logger } from '../utils/logger.js';
 import type { SupportedToken } from './index.js';
-
-const COINGECKO_IDS: Partial<Record<SupportedToken, string>> = {
-  XAUT: 'tether-gold',
-  BTC: 'bitcoin',
-};
+import { RateSnapshotsRepository } from '../storage/repositories/rate-snapshots.js';
 
 interface TokenPriceCacheEntry {
   rate: bigint;
   fetchedAt: number;
+  snapshotId?: string;
+}
+
+interface NormalizedAmountResult {
+  normalizedAmount: bigint;
+  rate: bigint;
+  snapshotId?: string;
+  source: 'wdk_price_rates' | 'config_override' | 'demo_static';
 }
 
 const tokenPriceCache = new Map<SupportedToken, TokenPriceCacheEntry>();
+const rateSnapshotsRepo = new RateSnapshotsRepository();
 const USDT_SCALE = 1_000_000n;
 
-function decimalToBaseUnits(value: number): bigint {
-  const fixed = value.toFixed(6);
-  const [whole = '0', frac = '0'] = fixed.split('.');
+function decimalToBaseUnits(value: number | string): bigint {
+  const numeric = typeof value === 'number' ? value.toFixed(6) : value;
+  const [whole = '0', frac = '0'] = numeric.split('.');
   return BigInt(whole) * USDT_SCALE + BigInt(frac.padEnd(6, '0').slice(0, 6));
 }
 
@@ -34,62 +39,130 @@ function getConfiguredRate(token: SupportedToken): bigint | null {
   return null;
 }
 
-async function fetchLiveRate(token: SupportedToken): Promise<bigint | null> {
-  const coinId = COINGECKO_IDS[token];
-  if (!coinId) {
-    return getConfiguredRate(token);
+async function fetchWdkRate(token: SupportedToken): Promise<bigint | null> {
+  if (!config.FLOW_ENABLE_LIVE_PRICE_RATES) {
+    return null;
   }
+
   const response = await fetch(
-    `${config.COINGECKO_BASE_URL}/simple/price?ids=${encodeURIComponent(coinId)}&vs_currencies=usd`,
+    `${config.WDK_PRICE_RATES_API_URL}?base=${encodeURIComponent(token)}&quote=USDT`,
     { headers: { accept: 'application/json' } },
   );
   if (!response.ok) {
-    throw new Error(`CoinGecko price request failed with ${response.status}`);
+    throw new Error(`WDK Price Rates request failed with ${response.status}`);
   }
-  const data = await response.json() as Record<string, { usd?: number }>;
-  const usd = data[coinId]?.usd;
-  if (!usd || !Number.isFinite(usd) || usd <= 0) {
+
+  const data = await response.json() as {
+    rate?: number | string;
+    data?: { rate?: number | string };
+  };
+  const rate = data.rate ?? data.data?.rate;
+  if (!rate) {
     return null;
   }
-  return decimalToBaseUnits(usd);
+  return decimalToBaseUnits(rate);
 }
 
-export async function getTokenRateInUsdtBase(token: SupportedToken): Promise<bigint> {
+function createSnapshot(token: SupportedToken, rate: bigint, source: NormalizedAmountResult['source']): string {
+  return rateSnapshotsRepo.create({
+    token,
+    quoteToken: 'USDT',
+    rate: rate.toString(),
+    source,
+    capturedAt: new Date().toISOString(),
+  }).id;
+}
+
+async function resolveRate(token: SupportedToken): Promise<NormalizedAmountResult> {
   const configured = getConfiguredRate(token);
   if (configured) {
-    tokenPriceCache.set(token, { rate: configured, fetchedAt: Date.now() });
-    return configured;
+    const snapshotId = createSnapshot(
+      token,
+      configured,
+      token === 'USDT' || token === 'USAT' ? 'demo_static' : 'config_override',
+    );
+    tokenPriceCache.set(token, { rate: configured, fetchedAt: Date.now(), snapshotId });
+    return {
+      normalizedAmount: 0n,
+      rate: configured,
+      snapshotId,
+      source: token === 'USDT' || token === 'USAT' ? 'demo_static' : 'config_override',
+    };
   }
 
   const cached = tokenPriceCache.get(token);
   if (cached && Date.now() - cached.fetchedAt < config.TOKEN_PRICE_CACHE_MS) {
-    return cached.rate;
+    return {
+      normalizedAmount: 0n,
+      rate: cached.rate,
+      snapshotId: cached.snapshotId,
+      source: 'wdk_price_rates',
+    };
   }
 
   try {
-    const live = await fetchLiveRate(token);
+    const live = await fetchWdkRate(token);
     if (live) {
-      tokenPriceCache.set(token, { rate: live, fetchedAt: Date.now() });
-      return live;
+      const snapshotId = createSnapshot(token, live, 'wdk_price_rates');
+      tokenPriceCache.set(token, { rate: live, fetchedAt: Date.now(), snapshotId });
+      return {
+        normalizedAmount: 0n,
+        rate: live,
+        snapshotId,
+        source: 'wdk_price_rates',
+      };
     }
   } catch (err) {
-    logger.warn({ err, token }, 'Token price fetch failed, using cached fallback if available');
+    logger.warn({ err, token }, 'WDK Price Rates fetch failed, using cached or static fallback');
   }
 
   if (cached) {
-    return cached.rate;
+    return {
+      normalizedAmount: 0n,
+      rate: cached.rate,
+      snapshotId: cached.snapshotId,
+      source: 'wdk_price_rates',
+    };
   }
 
-  return token === 'BTC' ? 100_000n * USDT_SCALE : USDT_SCALE;
+  const demoRate = token === 'BTC' ? 100_000n * USDT_SCALE : 3_000n * USDT_SCALE;
+  const snapshotId = createSnapshot(token, demoRate, 'demo_static');
+  tokenPriceCache.set(token, { rate: demoRate, fetchedAt: Date.now(), snapshotId });
+  return {
+    normalizedAmount: 0n,
+    rate: demoRate,
+    snapshotId,
+    source: 'demo_static',
+  };
 }
 
-export async function normalizeTokenAmountToUsdtBase(amount: bigint, token: SupportedToken): Promise<bigint> {
+export async function getTokenRateInUsdtBase(token: SupportedToken): Promise<bigint> {
+  const rate = await resolveRate(token);
+  return rate.rate;
+}
+
+export async function normalizeTokenAmountWithSnapshot(amount: bigint, token: SupportedToken): Promise<NormalizedAmountResult> {
+  const rateResult = await resolveRate(token);
   if (token === 'USDT' || token === 'USAT') {
-    return amount;
+    return {
+      normalizedAmount: amount,
+      rate: rateResult.rate,
+      snapshotId: rateResult.snapshotId,
+      source: rateResult.source,
+    };
   }
 
   const decimals = token === 'BTC' ? 8n : 6n;
   const scale = 10n ** decimals;
-  const rate = await getTokenRateInUsdtBase(token);
-  return (amount * rate) / scale;
+  return {
+    normalizedAmount: (amount * rateResult.rate) / scale,
+    rate: rateResult.rate,
+    snapshotId: rateResult.snapshotId,
+    source: rateResult.source,
+  };
+}
+
+export async function normalizeTokenAmountToUsdtBase(amount: bigint, token: SupportedToken): Promise<bigint> {
+  const normalized = await normalizeTokenAmountWithSnapshot(amount, token);
+  return normalized.normalizedAmount;
 }

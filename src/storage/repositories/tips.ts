@@ -19,13 +19,16 @@ export interface TipRecord {
   source?: TipSource;
   external_event_id?: string;
   external_actor_id?: string;
+  price_rate_snapshot_id?: string;
   escrow_address?: string;
   deposit_tx_hash?: string;
   settlement_tx_hash?: string;
   status: 'pending' | 'confirmed' | 'settled' | 'expired' | 'failed' | 'pending_retry';
   sybil_weight: number;
+  sybil_confidence?: number;
   sybil_flagged: number;
   sybil_reasons?: string;
+  sybil_reasoning?: string;
   message?: string;
   created_at: string;
   confirmed_at?: string;
@@ -38,17 +41,17 @@ export class TipsRepository {
     const id = uuidv4().replace(/-/g, '');
     db.prepare(`
       INSERT INTO tips (id, tip_uuid, round_id, tipper_telegram_id, tipper_wallet_address, creator_id,
-        amount_usdt, effective_amount, chain, token, amount_native, source, external_event_id, external_actor_id,
+        amount_usdt, effective_amount, chain, token, amount_native, source, external_event_id, external_actor_id, price_rate_snapshot_id,
         escrow_address, deposit_tx_hash, settlement_tx_hash,
-        status, sybil_weight, sybil_flagged, sybil_reasons, message, confirmed_at, settled_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        status, sybil_weight, sybil_confidence, sybil_flagged, sybil_reasons, sybil_reasoning, message, confirmed_at, settled_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, data.tip_uuid, data.round_id, data.tipper_telegram_id, data.tipper_wallet_address ?? null,
       data.creator_id, data.amount_usdt, data.effective_amount, data.chain,
       data.token ?? 'USDT', data.amount_native ?? data.amount_usdt, data.source ?? 'manual_bot',
-      data.external_event_id ?? null, data.external_actor_id ?? null,
+      data.external_event_id ?? null, data.external_actor_id ?? null, data.price_rate_snapshot_id ?? null,
       data.escrow_address ?? null, data.deposit_tx_hash ?? null, data.settlement_tx_hash ?? null,
-      data.status, data.sybil_weight, data.sybil_flagged, data.sybil_reasons ?? null,
-      data.message ?? null, data.confirmed_at ?? null, data.settled_at ?? null);
+      data.status, data.sybil_weight, data.sybil_confidence ?? null, data.sybil_flagged, data.sybil_reasons ?? null,
+      data.sybil_reasoning ?? null, data.message ?? null, data.confirmed_at ?? null, data.settled_at ?? null);
     return this.findById(id)!;
   }
 

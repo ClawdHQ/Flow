@@ -5,6 +5,7 @@ export interface SybilFlagRecord {
   id: string;
   tip_id: string;
   flag_score: number;
+  confidence?: number;
   weight: number;
   method: 'rule' | 'llm';
   reasons: string;
@@ -17,9 +18,9 @@ export class SybilFlagsRepository {
     const db = getDb();
     const id = uuidv4().replace(/-/g, '');
     db.prepare(`
-      INSERT INTO sybil_flags (id, tip_id, flag_score, weight, method, reasons, llm_reasoning)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(id, data.tip_id, data.flag_score, data.weight, data.method, data.reasons, data.llm_reasoning ?? null);
+      INSERT INTO sybil_flags (id, tip_id, flag_score, confidence, weight, method, reasons, llm_reasoning)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(id, data.tip_id, data.flag_score, data.confidence ?? null, data.weight, data.method, data.reasons, data.llm_reasoning ?? null);
     return this.findByTip(data.tip_id)!;
   }
 

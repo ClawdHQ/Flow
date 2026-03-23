@@ -1,5 +1,4 @@
 import { config } from '../config/index.js';
-import { resolveSupportedChain } from '../wallet/addresses.js';
 import { AutoTipExecutionsRepository, type AutoTipExecutionRecord } from '../storage/repositories/auto-tip-executions.js';
 import { AutoTipRulesRepository } from '../storage/repositories/auto-tip-rules.js';
 import { CreatorsRepository } from '../storage/repositories/creators.js';
@@ -8,11 +7,12 @@ import { RumbleCreatorLinksRepository } from '../storage/repositories/rumble-cre
 import { TipsRepository, type TipRecord } from '../storage/repositories/tips.js';
 import { PoolWalletManager } from '../wallet/pool.js';
 import { CreatorWalletManager } from '../wallet/creator.js';
-import { normalizeTokenAmountToUsdtBase } from '../tokens/pricing.js';
+import { normalizeTokenAmountWithSnapshot } from '../tokens/pricing.js';
 import { type SupportedToken } from '../tokens/index.js';
 import type { WatchProgressEvent } from '../rumble/events.js';
 import { SybilDetector } from './sybil.js';
 import { logger } from '../utils/logger.js';
+import { overlayHub } from '../realtime/overlay-hub.js';
 
 export interface AutoTipRule {
   viewerId: string;
@@ -37,6 +37,20 @@ interface AutoTipAgentDependencies {
   poolWalletFactory?: (chain: string) => Pick<PoolWalletManager, 'transferToken'>;
 }
 
+async function resolveCreatorDestination(
+  creatorWallet: AutoTipAgentDependencies['creatorWallet'] extends infer _T ? CreatorWalletManager : CreatorWalletManager,
+  creatorId: string,
+): Promise<{ address: string; network: string }> {
+  const payoutCapable = creatorWallet as CreatorWalletManager & {
+    getPayoutDestination?: (creatorId: string) => Promise<{ address: string; network: string }>;
+  };
+  if (typeof payoutCapable.getPayoutDestination === 'function') {
+    return payoutCapable.getPayoutDestination(creatorId);
+  }
+  const wallet = await creatorWallet.getOrCreateWallet(creatorId);
+  return { address: wallet.address, network: wallet.chain };
+}
+
 export class AutoTipAgent {
   private readonly autoTipRulesRepo: AutoTipRulesRepository;
   private readonly executionsRepo: AutoTipExecutionsRepository;
@@ -57,7 +71,7 @@ export class AutoTipAgent {
     this.tipsRepo = dependencies.tipsRepo ?? new TipsRepository();
     this.creatorWallet = dependencies.creatorWallet ?? new CreatorWalletManager();
     this.sybilDetector = dependencies.sybilDetector ?? new SybilDetector();
-    this.poolWalletFactory = dependencies.poolWalletFactory ?? (chain => new PoolWalletManager(resolveSupportedChain(chain)));
+    this.poolWalletFactory = dependencies.poolWalletFactory ?? (() => new PoolWalletManager());
   }
 
   async handleWatchEvent(event: WatchProgressEvent): Promise<void> {
@@ -93,13 +107,14 @@ export class AutoTipAgent {
       return;
     }
 
-    const creatorWallet = await this.creatorWallet.getOrCreateWallet(creator.id);
-    const txHash = await this.poolWalletFactory(creatorWallet.chain).transferToken(
-      creatorWallet.address,
+    const destination = await resolveCreatorDestination(this.creatorWallet, creator.id);
+    const txHash = await this.poolWalletFactory(destination.network).transferToken(
+      destination.address,
       trigger.amount,
       rule.token,
     );
-    const normalizedAmount = await normalizeTokenAmountToUsdtBase(trigger.amount, rule.token);
+    const normalized = await normalizeTokenAmountWithSnapshot(trigger.amount, rule.token);
+    const normalizedAmount = normalized.normalizedAmount;
     const tip = this.tipsRepo.create({
       tip_uuid: `auto-${event.event_id}-${trigger.kind}`,
       round_id: round.id,
@@ -108,11 +123,12 @@ export class AutoTipAgent {
       amount_usdt: normalizedAmount.toString(),
       amount_native: trigger.amount.toString(),
       effective_amount: normalizedAmount.toString(),
-      chain: creatorWallet.chain,
+      chain: destination.network,
       token: rule.token,
       source: 'auto_watch',
       external_event_id: event.event_id,
       external_actor_id: event.viewer_id,
+      price_rate_snapshot_id: normalized.snapshotId,
       deposit_tx_hash: txHash,
       status: 'confirmed',
       sybil_weight: 1.0,
@@ -132,7 +148,7 @@ export class AutoTipAgent {
       event_id: event.event_id,
       amount_base: trigger.amount.toString(),
       token: rule.token,
-      chain: creatorWallet.chain,
+      chain: destination.network,
       watch_percent: event.watch_percent,
       tx_hash: txHash,
       round_id: round.id,
@@ -149,6 +165,17 @@ export class AutoTipAgent {
       },
       'Auto-tip executed'
     );
+    overlayHub.publish({
+      type: 'tip',
+      creatorId: creator.id,
+      creatorHandle: event.creator_rumble_handle,
+      title: 'Auto-tip fired',
+      subtitle: `Triggered at ${event.watch_percent}% watch`,
+      amount: trigger.amount.toString(),
+      token: rule.token,
+      txHash,
+      createdAt: new Date().toISOString(),
+    });
   }
 
   registerAutoTipRule(rule: AutoTipRule): AutoTipRule & { id: string } {

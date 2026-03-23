@@ -9,12 +9,16 @@ export type TokenChainKey =
   | 'avalanche'
   | 'celo'
   | 'tron'
+  | 'bitcoin'
+  | 'ton'
   | 'ethereum_sepolia'
   | 'polygon_amoy'
   | 'arbitrum_sepolia'
   | 'avalanche_fuji'
   | 'celo_sepolia'
-  | 'tron_nile';
+  | 'tron_nile'
+  | 'bitcoin_testnet'
+  | 'ton_testnet';
 
 export interface TokenConfig {
   symbol: SupportedToken;
@@ -106,7 +110,7 @@ export function getTokenWeightMultiplier(token: SupportedToken): number {
 
 export function resolveActiveTokenChainKey(chain: SupportedChain, testnet = isTestnetEnabled()): TokenChainKey {
   if (!testnet) {
-    return chain;
+    return (chain === 'bitcoin' || chain === 'ton') ? chain : chain;
   }
 
   const mapping: Record<SupportedChain, TokenChainKey> = {
@@ -116,6 +120,8 @@ export function resolveActiveTokenChainKey(chain: SupportedChain, testnet = isTe
     avalanche: 'avalanche_fuji',
     celo: 'celo_sepolia',
     tron: 'tron_nile',
+    bitcoin: 'bitcoin_testnet',
+    ton: 'ton_testnet',
   };
   return mapping[chain];
 }

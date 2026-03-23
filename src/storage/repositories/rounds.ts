@@ -15,6 +15,10 @@ export interface RoundRecord {
   ipfs_url?: string;
   plan_hash?: string;
   agent_signature?: string;
+  plan_json?: string;
+  plan_signature?: string;
+  cid_signature?: string;
+  pool_wallet_address?: string;
   tipper_count: number;
   creator_count: number;
   sybil_flags_count: number;

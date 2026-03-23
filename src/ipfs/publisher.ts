@@ -1,19 +1,21 @@
 import crypto from 'crypto';
 import { RoundsRepository } from '../storage/repositories/rounds.js';
-import { CreatorsRepository } from '../storage/repositories/creators.js';
 import { TipsRepository } from '../storage/repositories/tips.js';
 import { PoolWalletManager } from '../wallet/pool.js';
 import { baseUnitsToUsdt } from '../utils/math.js';
 import { logger } from '../utils/logger.js';
-import type { AllocationPlan } from '../quadratic/allocator.js';
+import type { CanonicalSettlementPlan } from '../types/flow.js';
+import { ReportAttestationsRepository } from '../storage/repositories/report-attestations.js';
+import { canonicalJson } from '../utils/canonical-json.js';
 
 export interface IpfsResult {
   cid: string;
   url: string;
+  cidSignature: string;
 }
 
 export interface RoundReport {
-  version: '1.0';
+  version: '2.0';
   round: number;
   period: { start: string; end: string };
   stats: {
@@ -26,97 +28,64 @@ export interface RoundReport {
     matchingMultiplier: number;
     sybilFlagsApplied: number;
   };
-  distributions: {
-    creator: string;
-    walletAddress: string;
-    directTips: string;
-    matchAmount: string;
-    uniqueTippers: number;
-    quadraticScore: string;
-    txHash: string;
-    chain: string;
-  }[];
-  agentAttestation: {
-    planHash: string;
-    agentSignature: string;
-    agentWalletAddress: string;
-    ipfsSignature: string;
-  };
+  settlementPlan: CanonicalSettlementPlan;
   publishedAt: string;
 }
 
 const roundsRepo = new RoundsRepository();
-const creatorsRepo = new CreatorsRepository();
 const tipsRepo = new TipsRepository();
 const poolWallet = new PoolWalletManager();
+const reportAttestationsRepo = new ReportAttestationsRepository();
 
-export async function publishRoundReport(roundId: string, allocationPlan: AllocationPlan): Promise<IpfsResult> {
+export async function publishRoundReport(roundId: string, allocationPlan: CanonicalSettlementPlan): Promise<IpfsResult> {
   const round = roundsRepo.findById(roundId);
   if (!round) throw new Error(`Round not found: ${roundId}`);
 
   const tips = tipsRepo.findConfirmedByRound(roundId);
-  const poolBalance = allocationPlan.totalPool;
-  const agentAddress = await poolWallet.getAddress();
+  const poolBalance = BigInt(allocationPlan.totalPool);
 
   const report: RoundReport = {
-    version: '1.0',
+    version: '2.0',
     round: round.round_number,
     period: { start: round.started_at, end: round.ended_at ?? new Date().toISOString() },
     stats: {
       totalTippers: new Set(tips.map(t => t.tipper_telegram_id)).size,
       uniqueCreators: new Set(tips.map(t => t.creator_id)).size,
-      totalDirectTips: baseUnitsToUsdt(tips.reduce((s, t) => s + BigInt(t.amount_usdt), 0n)),
-      totalMatched: baseUnitsToUsdt(allocationPlan.totalMatched),
-      poolUsed: baseUnitsToUsdt(allocationPlan.totalMatched),
-      poolRemaining: baseUnitsToUsdt(poolBalance > allocationPlan.totalMatched ? poolBalance - allocationPlan.totalMatched : 0n),
+      totalDirectTips: baseUnitsToUsdt(tips.reduce((sum, tip) => sum + BigInt(tip.amount_usdt), 0n)),
+      totalMatched: baseUnitsToUsdt(BigInt(allocationPlan.totalMatched)),
+      poolUsed: baseUnitsToUsdt(BigInt(allocationPlan.totalMatched)),
+      poolRemaining: baseUnitsToUsdt(poolBalance > BigInt(allocationPlan.totalMatched) ? poolBalance - BigInt(allocationPlan.totalMatched) : 0n),
       matchingMultiplier: round.matching_multiplier,
       sybilFlagsApplied: tips.filter(t => t.sybil_flagged).length,
     },
-    distributions: allocationPlan.allocations.map(a => {
-      const creator = creatorsRepo.findById(a.creatorId);
-      return {
-        creator: creator?.username ?? a.creatorId,
-        walletAddress: a.walletAddress,
-        directTips: baseUnitsToUsdt(a.directTips),
-        matchAmount: baseUnitsToUsdt(a.matchAmount),
-        uniqueTippers: a.uniqueTippers,
-        quadraticScore: a.score.toString(),
-        txHash: a.txHash ?? '',
-        chain: a.chain,
-      };
-    }),
-    agentAttestation: {
-      planHash: round.plan_hash ?? '',
-      agentSignature: allocationPlan.agentSignature ?? '',
-      agentWalletAddress: agentAddress,
-      ipfsSignature: '',
-    },
+    settlementPlan: allocationPlan,
     publishedAt: new Date().toISOString(),
   };
 
-  const reportJson = JSON.stringify(report);
-  // Generate a deterministic CID-like identifier from the report content
-  const mockCid = 'bafyrei' + crypto.createHash('sha256').update(reportJson).digest('hex').slice(0, 52);
+  const reportJson = canonicalJson(report);
+  const cid = 'bafyrei' + crypto.createHash('sha256').update(reportJson).digest('hex').slice(0, 52);
+  const cidSignature = await poolWallet.signData(cid);
 
-  const ipfsDisabled = process.env['IPFS_DISABLED'] === 'true';
-  const token = process.env['WEB3_STORAGE_TOKEN'];
-
-  if (ipfsDisabled) {
-    logger.warn({ cid: mockCid }, 'IPFS disabled — round report not published to IPFS');
-  } else if (token && token.length > 0) {
-    // In production: upload to web3.storage using @web3-storage/w3up-client
-    logger.info({ cid: mockCid }, 'Would upload to IPFS in production');
+  if (process.env['IPFS_DISABLED'] === 'true') {
+    logger.warn({ cid }, 'IPFS disabled — round report not published to IPFS');
+  } else if (process.env['WEB3_STORAGE_TOKEN']) {
+    logger.info({ cid }, 'Would upload round report to IPFS in a live environment');
   } else {
-    logger.info({ cid: mockCid }, 'IPFS mock: WEB3_STORAGE_TOKEN not set');
+    logger.info({ cid }, 'IPFS mock: WEB3_STORAGE_TOKEN not set');
   }
 
-  // Sign the CID with the pool wallet to demonstrate signing logic
-  // (runs regardless of whether IPFS is disabled — attests to the content hash)
-  const ipfsSignature = await poolWallet.signData(mockCid);
-  report.agentAttestation.ipfsSignature = ipfsSignature;
+  reportAttestationsRepo.create({
+    round_id: roundId,
+    plan_hash: allocationPlan.signatures.planHash,
+    plan_signature: allocationPlan.signatures.planSignature,
+    report_cid: cid,
+    cid_signature: cidSignature,
+    agent_wallet_address: allocationPlan.poolAddress,
+  });
 
   return {
-    cid: mockCid,
-    url: `https://ipfs.io/ipfs/${mockCid}`,
+    cid,
+    url: `https://ipfs.io/ipfs/${cid}`,
+    cidSignature,
   };
 }
