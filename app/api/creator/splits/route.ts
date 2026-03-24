@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isSupabaseConfigured, sbUpsert } from '@/server/storage/supabase';
 
 function getToken(req: NextRequest): string | undefined {
   const h = req.headers.get('authorization');
@@ -7,7 +8,7 @@ function getToken(req: NextRequest): string | undefined {
 
 async function requireSession(req: NextRequest) {
   const { authService } = await import('@/server/auth/service');
-  const session = authService.getSession(getToken(req));
+  const session = await authService.getSession(getToken(req));
   if (!session) throw new Error('Unauthorized');
   return session;
 }
@@ -17,15 +18,22 @@ export async function PUT(request: NextRequest) {
     const session = await requireSession(request);
     const body = await request.json();
 
-    const { SplitsRepository } = await import('@/server/storage/repositories/splits');
-    const repo = new SplitsRepository();
-    const split = repo.upsert({
+    const data = {
       creator_id: session.creator_id,
       creator_bps: Number(body.creator_bps ?? 8500),
       pool_bps: Number(body.pool_bps ?? 1000),
       protocol_bps: Number(body.protocol_bps ?? 100),
       collaborators: JSON.stringify(Array.isArray(body.collaborators) ? body.collaborators : []),
-    });
+    };
+
+    let split: any;
+    if (isSupabaseConfigured()) {
+      split = await sbUpsert('splits', data, ['creator_id']);
+    } else {
+      const { SplitsRepository } = await import('@/server/storage/repositories/splits');
+      const repo = new SplitsRepository();
+      split = repo.upsert(data);
+    }
     return NextResponse.json(split);
   } catch (err) {
     if (err instanceof Error && err.message === 'Unauthorized') {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { isSupabaseConfigured, sbFindOne } from '@/server/storage/supabase';
 
 async function getAuthService() {
   const { authService } = await import('@/server/auth/service');
@@ -25,20 +26,28 @@ function getToken(req: NextRequest): string | undefined {
 export async function GET(request: NextRequest) {
   const token = getToken(request);
   const authService = await getAuthService();
-  const session = authService.getSession(token);
+  const session = await authService.getSession(token);
 
   if (!session) {
     return NextResponse.json({ error: 'Not authenticated' }, { status: 401 });
   }
 
-  const creatorsRepo = await getCreatorsRepo();
-  const creator = creatorsRepo.findById(session.creator_id);
-  const adminWalletsRepo = await getCreatorAdminWalletsRepo();
-  const adminWallet = adminWalletsRepo.findByCreatorId(session.creator_id);
+  let creator: any = null;
+  let adminWallet: any = null;
+
+  if (isSupabaseConfigured()) {
+    creator = await sbFindOne('creators', { id: session.creator_id });
+    adminWallet = await sbFindOne('creator_admin_wallets', { creator_id: session.creator_id, family: session.family, address: session.address });
+  } else {
+    const creatorsRepo = await getCreatorsRepo();
+    creator = creatorsRepo.findById(session.creator_id);
+    const adminWalletsRepo = await getCreatorAdminWalletsRepo();
+    adminWallet = adminWalletsRepo.findByCreatorId(session.creator_id);
+  }
 
   return NextResponse.json({
     creator_id: session.creator_id,
-    username: creator?.username,
+    username: creator?.username || session.username,
     address: adminWallet?.address ?? session.address,
     family: adminWallet?.family ?? session.family,
     network: adminWallet?.network ?? 'polygon',
@@ -50,7 +59,7 @@ export async function DELETE(request: NextRequest) {
   const token = getToken(request);
   if (token) {
     const authService = await getAuthService();
-    authService.logout(token);
+    await authService.logout(token);
   }
   return NextResponse.json({ ok: true });
 }
