@@ -1,7 +1,4 @@
-import pinoLib from 'pino';
-
-// pino types differ between ESM and CJS — use the module directly
-const pino = (typeof pinoLib === 'function' ? pinoLib : (pinoLib as any).default) as typeof pinoLib;
+import { pino } from 'pino';
 
 export const logger = pino({
   level: process.env['LOG_LEVEL'] ?? 'info',

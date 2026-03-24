@@ -40,7 +40,7 @@ export const TOKENS: Record<SupportedToken, TokenConfig> = {
       avalanche: '0x9702230A8Ea53601f5cD2dc00fDBc13d4dF4A8c7',
       tron: 'TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t',
       ethereum_sepolia: '0xd077A400968890Eacc75cdc901F0356c943e4fDb',
-      polygon_amoy: '0x1616d5C7f9bc5CBAC54E47f3Fcd27CAf6323dFb5',
+      polygon_amoy: '0x1616d5c7f9bc5cbac54e47f3fcd27caf6323dfb5',
       arbitrum_sepolia: '0xfd064A18f3BF249cf1f87FC203E90D8f650f2d63',
     },
     isNative: false,

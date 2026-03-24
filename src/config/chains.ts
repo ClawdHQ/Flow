@@ -119,7 +119,7 @@ function buildChainConfigs(testnet: boolean): Record<SupportedChain, ChainConfig
         chainId: 80002,
         rpcUrl: getOptionalConfigString('POLYGON_AMOY_RPC_URL') ?? 'https://rpc-amoy.polygon.technology',
         usdtAddress: getOptionalConfigString('POLYGON_AMOY_USDT_ADDRESS')
-          ?? '0x1616d5C7f9bc5CBAC54E47f3Fcd27CAf6323dFb5',
+          ?? '0x1616d5c7f9bc5cbac54e47f3fcd27caf6323dfb5',
         blockTimeSeconds: 2,
         isTestnet: true,
         wdkChainId: 'polygon:80002',
