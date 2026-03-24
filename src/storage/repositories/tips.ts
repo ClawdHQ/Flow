@@ -33,6 +33,9 @@ export interface TipRecord {
   created_at: string;
   confirmed_at?: string;
   settled_at?: string;
+  protocol_fee?: string;
+  pool_fee?: string;
+  creator_share?: string;
 }
 
 export class TipsRepository {
@@ -43,15 +46,17 @@ export class TipsRepository {
       INSERT INTO tips (id, tip_uuid, round_id, tipper_telegram_id, tipper_wallet_address, creator_id,
         amount_usdt, effective_amount, chain, token, amount_native, source, external_event_id, external_actor_id, price_rate_snapshot_id,
         escrow_address, deposit_tx_hash, settlement_tx_hash,
-        status, sybil_weight, sybil_confidence, sybil_flagged, sybil_reasons, sybil_reasoning, message, confirmed_at, settled_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        status, sybil_weight, sybil_confidence, sybil_flagged, sybil_reasons, sybil_reasoning, message, confirmed_at, settled_at,
+        protocol_fee, pool_fee, creator_share)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(id, data.tip_uuid, data.round_id, data.tipper_telegram_id, data.tipper_wallet_address ?? null,
       data.creator_id, data.amount_usdt, data.effective_amount, data.chain,
       data.token ?? 'USDT', data.amount_native ?? data.amount_usdt, data.source ?? 'manual_bot',
       data.external_event_id ?? null, data.external_actor_id ?? null, data.price_rate_snapshot_id ?? null,
       data.escrow_address ?? null, data.deposit_tx_hash ?? null, data.settlement_tx_hash ?? null,
       data.status, data.sybil_weight, data.sybil_confidence ?? null, data.sybil_flagged, data.sybil_reasons ?? null,
-      data.sybil_reasoning ?? null, data.message ?? null, data.confirmed_at ?? null, data.settled_at ?? null);
+      data.sybil_reasoning ?? null, data.message ?? null, data.confirmed_at ?? null, data.settled_at ?? null,
+      data.protocol_fee ?? '0', data.pool_fee ?? '0', data.creator_share ?? data.amount_usdt);
     return this.findById(id)!;
   }
 
@@ -88,6 +93,13 @@ export class TipsRepository {
   findByTipperAndRound(tipperId: string, roundId: string): TipRecord[] {
     const db = getDb();
     return db.prepare('SELECT * FROM tips WHERE tipper_telegram_id = ? AND round_id = ?').all(tipperId, roundId) as TipRecord[];
+  }
+
+  findByTipper(tipperAddress: string, limit = 20): TipRecord[] {
+    const db = getDb();
+    return db.prepare(
+      'SELECT * FROM tips WHERE tipper_wallet_address = ? ORDER BY created_at DESC LIMIT ?',
+    ).all(tipperAddress, limit) as TipRecord[];
   }
 
   update(id: string, fields: Partial<TipRecord>): void {

@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flow Presentation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;600&family=Courier+Prime:wght@400;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b100f;
+    --bg-2: #131b19;
+    --paper: #efe8d9;
+    --gold: #ca9b4b;
+    --sage: #79b494;
+    --rust: #cd6b58;
+    --line: rgba(239,232,217,0.1);
+    --muted: rgba(239,232,217,0.68);
+    --serif: "Cormorant Garamond", serif;
+    --mono: "Courier Prime", monospace;
+    --sw: 1280px;
+    --sh: 720px;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #050807;
+    color: var(--paper);
+    font-family: var(--mono);
+  }
+  #deck {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--sw);
+    height: var(--sh);
+    transform: translate(-50%, -50%);
+    overflow: hidden;
+  }
+  @media (max-aspect-ratio: 16/9) {
+    #deck { transform: translate(-50%, -50%) scale(calc(100vw / 1280)); transform-origin: center; }
+  }
+  @media (min-aspect-ratio: 16/9) {
+    #deck { transform: translate(-50%, -50%) scale(calc(100vh / 720)); transform-origin: center; }
+  }
+  .slide {
+    position: absolute;
+    inset: 0;
+    padding: 56px;
+    background:
+      radial-gradient(circle at top left, rgba(121,180,148,0.12), transparent 28%),
+      radial-gradient(circle at 85% 15%, rgba(202,155,75,0.12), transparent 22%),
+      linear-gradient(160deg, var(--bg), var(--bg-2));
+    display: none;
+  }
+  .slide.active { display: grid; }
+  .eyebrow {
+    color: var(--gold);
+    font-size: 10px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+  h1, h2 {
+    margin: 12px 0 16px;
+    font-family: var(--serif);
+    font-weight: 300;
+    line-height: 0.92;
+    letter-spacing: -0.05em;
+  }
+  h1 { font-size: 88px; }
+  h2 { font-size: 58px; }
+  p {
+    margin: 0;
+    line-height: 1.75;
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .big {
+    font-family: var(--serif);
+    font-size: 72px;
+    line-height: 0.95;
+    color: var(--paper);
+  }
+  .gold { color: var(--gold); }
+  .sage { color: var(--sage); }
+  .rust { color: var(--rust); }
+  .meta {
+    position: absolute;
+    right: 56px;
+    bottom: 28px;
+    color: rgba(239,232,217,0.32);
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+  }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: 1.1fr 0.9fr;
+    gap: 22px;
+    align-items: stretch;
+  }
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .card {
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    background: rgba(255,255,255,0.03);
+    padding: 22px;
+  }
+  .card strong {
+    display: block;
+    margin-bottom: 10px;
+    color: var(--paper);
+    font-size: 13px;
+  }
+  .formula {
+    padding: 28px;
+    border-radius: 24px;
+    border: 1px solid rgba(202,155,75,0.24);
+    background: rgba(202,155,75,0.08);
+    text-align: center;
+  }
+  .formula .eq {
+    font-family: var(--serif);
+    font-size: 44px;
+    color: var(--gold);
+  }
+  .steps {
+    display: grid;
+    gap: 14px;
+  }
+  .step {
+    padding-top: 14px;
+    border-top: 1px solid var(--line);
+  }
+  .step:first-child { border-top: 0; padding-top: 0; }
+  .step strong {
+    color: var(--gold);
+    display: block;
+    margin-bottom: 6px;
+  }
+  .nav {
+    position: absolute;
+    left: 50%;
+    bottom: 26px;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 8px;
+    z-index: 10;
+  }
+  .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 0;
+    background: rgba(239,232,217,0.18);
+  }
+  .dot.active { background: var(--gold); }
+</style>
+</head>
+<body>
+  <div id="deck">
+    <section class="slide active">
+      <div>
+        <div class="eyebrow">Flow x Rumble x WDK</div>
+        <h1>1000 fans watching<br><span class="gold">beats</span> any whale.</h1>
+        <p style="max-width:680px">
+          Flow is an autonomous quadratic tipping agent built on top of Rumble's Tether WDK wallet.
+          When a viewer hits 50% watch time, Flow fires a `$0.10 USD₮` auto-tip. Completion fires `$0.25`.
+          The crowd signal becomes the treasury signal.
+        </p>
+      </div>
+      <div class="meta">01 / Thesis</div>
+    </section>
+
+    <section class="slide">
+      <div class="grid-2">
+        <div>
+          <div class="eyebrow">Problem</div>
+          <h2>Rumble has the audience.<br><span class="rust">The money flows wrong.</span></h2>
+          <div class="steps">
+            <div class="step"><strong>Watching is passive</strong><p>Tipping interrupts the moment, so broad audiences rarely convert into support.</p></div>
+            <div class="step"><strong>Linear systems miss community signal</strong><p>One `$100` tip and `1000 x $0.10` tips look identical in a simple ledger.</p></div>
+            <div class="step"><strong>Matching pools need operators</strong><p>Someone still has to review, approve, and manually release treasury funds.</p></div>
+          </div>
+        </div>
+        <div class="formula">
+          <div class="eyebrow" style="margin-bottom:10px">Corrected Example</div>
+          <div class="big">62.5x</div>
+          <p style="margin-top:12px">`1000 × $0.10` unlocks 62.5x more matching allocation than `1 × $100`.</p>
+        </div>
+      </div>
+      <div class="meta">02 / Problem</div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Mechanism</div>
+      <h2>Quadratic funding makes breadth visible.</h2>
+      <div class="grid-2">
+        <div class="formula">
+          <div class="eq">score = (Σ √tip)<sup>2</sup></div>
+          <p style="margin-top:12px">Every tip source joins the same 24-hour round.</p>
+        </div>
+        <div class="steps">
+          <div class="step"><strong>Watch-time auto-tips</strong><p>50% watch = `$0.10 USD₮`. Completion = `$0.25`.</p></div>
+          <div class="step"><strong>Premium weights</strong><p>XAU₮ tips count `2x`. BTC counts `3x` after USD₮ normalization.</p></div>
+          <div class="step"><strong>Sybil-aware scoring</strong><p>The agent returns `{ confidence, weight }` and scales each tip before allocation.</p></div>
+        </div>
+      </div>
+      <div class="meta">03 / Math</div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Architecture</div>
+      <h2>One canonical plan. One hash. One signed treasury release.</h2>
+      <div class="grid-3">
+        <div class="card"><strong>Rumble events</strong><p>AutoTipAgent and EventTriggerAgent transform watch, milestone, and native tip events into a shared round ledger.</p></div>
+        <div class="card"><strong>Canonical settlement</strong><p>RoundManager serializes deterministic JSON, computes SHA-256, signs the plan hash, verifies it, then executes payouts.</p></div>
+        <div class="card"><strong>Attestation</strong><p>After execution, Flow signs the IPFS CID too, so both the allocation plan and archived report are separately attested.</p></div>
+      </div>
+      <div class="meta">04 / Settlement</div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">WDK Stack</div>
+      <h2>Multi-family by design.</h2>
+      <div class="grid-3">
+        <div class="card"><strong>Wallet families</strong><p>`evm`, `evm_erc4337`, `tron_gasfree`, `btc`, `ton`, `ton_gasless`.</p></div>
+        <div class="card"><strong>Networks</strong><p>Bitcoin, Ethereum, Polygon, Arbitrum, Avalanche, Celo, TON, and TRON across mainnet and testnet.</p></div>
+        <div class="card"><strong>Routing</strong><p>Polygon is the pool home chain. EVM-to-EVM creator payouts can be planned as bridge actions.</p></div>
+      </div>
+      <div class="meta">05 / WDK</div>
+    </section>
+
+    <section class="slide">
+      <div class="eyebrow">Product Surface</div>
+      <h2>Portal. Overlay. Telegram. Agents.</h2>
+      <div class="grid-3">
+        <div class="card"><strong>Creator portal</strong><p>Wallet auth, revenue splits, payout destinations, overlay settings, round reports.</p></div>
+        <div class="card"><strong>OBS overlay</strong><p>WebSocket-fed live tip events, pool progress, and settlement activity.</p></div>
+        <div class="card"><strong>Agent skill surface</strong><p>OpenClaw-compatible actions plus x402-style gating for paid agent endpoints only.</p></div>
+      </div>
+      <div class="meta">06 / Surface</div>
+    </section>
+
+    <section class="slide">
+      <div>
+        <div class="eyebrow">Tracks</div>
+        <h2>Tipping Bot.<br>Agent Wallets.<br><span class="sage">Best Overall.</span></h2>
+        <p style="max-width:720px">
+          Flow builds directly on Rumble's WDK wallet infrastructure, treats autonomous agents as economic infrastructure,
+          and turns passive viewership into programmable community funding. The repo now ships the runtime, portal,
+          overlay, deck, skill surface, and tests for that model.
+        </p>
+      </div>
+      <div class="meta">07 / Close</div>
+    </section>
+
+    <div class="nav" id="nav"></div>
+  </div>
+
+<script>
+  const slides = Array.from(document.querySelectorAll('.slide'));
+  const nav = document.getElementById('nav');
+  let index = 0;
+
+  function renderNav() {
+    nav.innerHTML = slides.map((_, i) => `<button class="dot ${i === index ? 'active' : ''}" data-index="${i}" aria-label="Go to slide ${i + 1}"></button>`).join('');
+    nav.querySelectorAll('.dot').forEach(btn => btn.addEventListener('click', () => show(Number(btn.dataset.index))));
+  }
+
+  function show(next) {
+    index = (next + slides.length) % slides.length;
+    slides.forEach((slide, i) => slide.classList.toggle('active', i === index));
+    renderNav();
+  }
+
+  window.addEventListener('keydown', event => {
+    if (event.key === 'ArrowRight' || event.key === ' ') show(index + 1);
+    if (event.key === 'ArrowLeft') show(index - 1);
+  });
+
+  renderNav();
+</script>
+</body>
+</html>

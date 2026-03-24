@@ -1,7 +1,7 @@
 import cron from 'node-cron';
 import { PoolWalletManager } from '../wallet/pool.js';
 import { RoundsRepository } from '../storage/repositories/rounds.js';
-import { SupportedChain, SUPPORTED_CHAINS } from '../config/chains.js';
+import { getPoolHomeChain, SupportedChain, SUPPORTED_CHAINS } from '../config/chains.js';
 import { logger } from '../utils/logger.js';
 import { baseUnitsToUsdt } from '../utils/math.js';
 
@@ -12,6 +12,7 @@ export interface PoolReport {
   projectedPoolUsage: bigint;
   roundsUntilDepletion: number;
   totalDistributedAllTime: bigint;
+  protocolBalance: bigint;
 }
 
 const roundsRepo = new RoundsRepository();
@@ -89,10 +90,12 @@ export class PoolMonitor {
       projectedPoolUsage: avgUsage,
       roundsUntilDepletion,
       totalDistributedAllTime: totalDistributed,
+      protocolBalance: await new PoolWalletManager(getPoolHomeChain()).getProtocolBalance(),
     };
   }
 
   async collectProtocolFees(): Promise<void> {
-    logger.info('Protocol fee collection triggered');
+    const protocolBalance = await new PoolWalletManager(getPoolHomeChain()).getProtocolBalance();
+    logger.info({ protocolBalance: baseUnitsToUsdt(protocolBalance) }, 'Protocol fee report');
   }
 }

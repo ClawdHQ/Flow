@@ -93,4 +93,9 @@ export class AutoTipRulesRepository {
       ORDER BY creator_id IS NULL DESC, created_at DESC
     `).all(viewerId) as AutoTipRuleRecord[];
   }
+
+  delete(id: string): void {
+    const db = getDb();
+    db.prepare('DELETE FROM auto_tip_rules WHERE id = ?').run(id);
+  }
 }

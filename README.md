@@ -31,7 +31,7 @@ This repo now models the product as a multi-family wallet system instead of an E
 - signature-gated pool execution
 - bridge planning for EVM-to-EVM payouts
 - payout destinations and creator admin wallets as first-class records
-- chain-native auth endpoints for EVM, TRON, BTC, and TON
+- single-path seed-phrase auth connect endpoint for EVM, TRON, BTC, and TON
 - live overlay updates over WebSocket
 - creator portal APIs for splits, payout preferences, and overlay settings
 - report attestations with both plan-hash and CID signatures
@@ -99,8 +99,8 @@ The web app is now one Express surface serving:
 
 Portal APIs:
 
-- `POST /api/auth/:family/challenge`
-- `POST /api/auth/:family/verify`
+- `POST /api/auth/seed`
+- `POST /api/auth/connect`
 - `POST /api/auth/logout`
 - `GET /api/creator/me`
 - `PUT /api/creator/splits`
@@ -115,7 +115,7 @@ Overlay transport:
 
 ## Agent Skill Surface
 
-The OpenClaw/WDK skill definition lives in [src/openclaw-skill.md](/Users/ginmax/Flow/src/openclaw-skill.md).
+The OpenClaw/WDK skill definition lives in [src/openclaw-skill.md](src/openclaw-skill.md).
 
 Paid agent-facing skill routes sit behind a simple x402-style gate:
 
@@ -140,29 +140,7 @@ Important tables now include:
 - `settlement_executions`
 - `report_attestations`
 - `telegram_notifications`
-- `auth_challenges`
 - `auth_sessions`
-
-## Demo Mode
-
-The repo is designed to remain usable without every external credential or network integration.
-
-When live adapters are unavailable, Flow enters explicit demo mode for that capability:
-
-- no unsigned pool-release path is exposed
-- signed settlement planning still happens
-- bridge/direct receipts still get recorded
-- pages and APIs continue to work
-
-Relevant capability flags include:
-
-- `FLOW_ENABLE_LIVE_ERC4337`
-- `FLOW_ENABLE_LIVE_USDT0_BRIDGE`
-- `FLOW_ENABLE_LIVE_PRICE_RATES`
-- `FLOW_ENABLE_LIVE_INDEXER`
-- `FLOW_ENABLE_LIVE_BTC_WALLET`
-- `FLOW_ENABLE_LIVE_TON_WALLET`
-- `FLOW_ENABLE_LIVE_TRON_GASFREE`
 
 ## Local Development
 
@@ -185,6 +163,129 @@ Useful URLs:
 - `http://localhost:3000/dashboard`
 - `http://localhost:3000/present`
 
+## Complete User Flow
+
+### Creator Flow (End-to-End)
+
+1. Onboarding
+- Creator opens landing page and goes to `/login`.
+- Creator generates or imports a seed phrase.
+- Creator confirms seed backup and selects a wallet family.
+
+2. Authentication
+- Client calls `POST /api/auth/connect` with `family`, `network`, and `seedPhrase`.
+- If username is missing, creator completes the inline username step and retries.
+- Session token is issued and creator is redirected to `/creator`.
+
+3. Creator Setup
+- Portal loads creator profile through `GET /api/creator/me`.
+- Creator configures split rules with `PUT /api/creator/splits`.
+- Creator sets payout destination with `PUT /api/creator/payout`.
+- Creator customizes overlay settings with `PUT /api/creator/overlay`.
+
+4. Live Round Participation
+- Audience watch events generate tipping intents.
+- Tips are recorded in active round state and contribute to quadratic scoring.
+- Creator monitors progress from `/dashboard` and overlay state.
+
+5. Settlement and Reporting
+- Round manager closes round and computes allocations.
+- Canonical plan hash + pool signature gate execution.
+- Settlement artifacts, attestations, and notifications are persisted.
+
+### Tipper (Audience) Flow (End-to-End)
+
+1. Viewer Watches Content
+- Viewer starts a Rumble session for a creator.
+- Event trigger pipeline tracks watch milestones.
+
+2. Automatic Tip Events
+- At 50% watch threshold, Flow records auto-tip (for example 0.10 USDT).
+- At completion threshold, Flow records second auto-tip (for example 0.25 USDT).
+- Optional manual tipping can be added to the same round where applicable.
+
+3. Round Contribution and Matching
+- Tips are attributed to creator + round.
+- Quadratic allocation favors broad participation over single large contributors.
+- Viewer impact is reflected in round-level allocation reports after settlement.
+
+4. Post-Round Visibility
+- Audience can see creator overlay momentum and final outcomes.
+- System stores receipts for auditability and trust.
+
+## Vercel Live Deployment
+
+### 1. Prepare Release Branch
+
+```bash
+git checkout -b release/vercel-live
+npm install
+npm run build
+npm test
+```
+
+### 2. Push to Git Provider
+
+```bash
+git add .
+git commit -m "chore: prepare vercel live deployment"
+git push origin release/vercel-live
+```
+
+### 3. Create Vercel Project
+
+1. Import repository in Vercel.
+2. Select Next.js framework preset.
+3. Set production branch.
+4. Keep root directory at repository root.
+
+### 4. Configure Production Environment Variables
+
+Set these in Vercel Project Settings:
+
+- `NODE_ENV=production`
+- `NEXT_PUBLIC_APP_URL=https://your-live-domain.com`
+- `FLOW_AUTH_SECRET=<strong-random-secret>`
+- `FLOW_SEED_ENCRYPTION_KEY=<strong-random-secret>`
+- Add any wallet/Telegram/MoonPay/IPFS keys required by enabled features.
+
+### 5. Storage Warning (Important)
+
+Flow currently uses SQLite by default. Vercel serverless filesystem is ephemeral.
+
+For real production persistence, migrate to a managed data store (for example Turso, Neon, or Postgres) and point Flow repositories to that backend.
+
+### 6. Deploy and Verify
+
+- Trigger first production deployment in Vercel.
+- Confirm these routes load on live domain:
+  - `/`
+  - `/login`
+  - `/creator`
+  - `/dashboard`
+  - `/api/auth/session`
+
+### 7. Configure External Callbacks to Live URL
+
+Update any integrations/webhooks to use the production base URL:
+
+- `https://your-live-domain.com/api/...`
+
+Typical integrations to update:
+
+- Rumble webhooks
+- Telegram callbacks
+- Any bridge/wallet callback routes
+
+### 8. Optional Vercel CLI Deployment
+
+```bash
+npm i -g vercel
+vercel login
+vercel link
+vercel --prod
+```
+
 ## Tech
 
 - TypeScript, NodeNext, strict mode
@@ -197,6 +298,57 @@ Useful URLs:
 - WebSocket overlay transport via `ws`
 - TON proof helpers via `@ton/core` and `@ton/crypto`
 - BTC BIP-322 verification via `bip322-js`
+
+## Supabase Database Setup
+
+Flow uses a **dual-path** database strategy:
+
+| Environment | Database | Location |
+|---|---|---|
+| Local development | SQLite via `better-sqlite3` | `./data/flow.db` |
+| Production (Vercel) | Supabase PostgreSQL | Managed cloud |
+
+### 1. Create a Supabase project
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. In **Settings → API** copy **Project URL** and **service_role key** (keep this secret — server-side only).
+
+### 2. Run the migration
+
+Open the **SQL Editor** in your project and paste the contents of
+[`supabase/migrations/001_initial.sql`](supabase/migrations/001_initial.sql).
+This creates all tables, indexes and the `audience_members` profile table.
+
+Alternatively, if you have the Supabase CLI:
+
+```bash
+supabase db push
+```
+
+### 3. Set environment variables
+
+Add these to your `.env.local` (and to Vercel → Settings → Environment Variables):
+
+```env
+SUPABASE_URL=https://<project-ref>.supabase.co
+SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
+```
+
+> **Note:** The service role key bypasses Row Level Security and should never be
+> exposed client-side. Next.js API routes run server-side, so this is safe.
+
+### 4. How dual-path works
+
+Every `app/api/audience/` route checks `isSupabaseConfigured()` at runtime:
+
+```
+SUPABASE_URL set?
+  ├── Yes → use Supabase async helpers (sbInsert / sbFindMany / …)
+  └── No  → fall through to SQLite repositories (unchanged)
+```
+
+The agent runtime (`src/`) always uses SQLite directly — Supabase is only used by
+the Next.js server layer and the audience-facing API.
 
 ## Tracks
 

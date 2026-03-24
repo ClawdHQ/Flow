@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flow Creator Portal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #0a1114;
+    --ink-soft: #14323b;
+    --paper: #f6f0e4;
+    --panel: rgba(255,255,255,0.72);
+    --line: rgba(10,17,20,0.1);
+    --gold: #c89a45;
+    --mint: #65b89a;
+    --red: #c56559;
+    --muted: rgba(10,17,20,0.62);
+    --serif: "Instrument Serif", Georgia, serif;
+    --mono: "DM Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(circle at top left, rgba(101,184,154,0.18), transparent 28%),
+      linear-gradient(180deg, #fbf6ed 0%, #f3ecde 100%);
+    color: var(--ink);
+    font-family: var(--mono);
+  }
+  .shell {
+    width: min(1180px, calc(100vw - 28px));
+    margin: 0 auto;
+    padding: 24px 0 56px;
+  }
+  .topbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+  .brand {
+    font-family: var(--serif);
+    font-size: 30px;
+    letter-spacing: -0.04em;
+  }
+  .brand span { color: var(--gold); font-style: italic; }
+  .actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 12px 16px;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    cursor: pointer;
+    background: white;
+    color: var(--ink);
+  }
+  .btn.primary {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--paper);
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: 360px 1fr;
+    gap: 18px;
+  }
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: 28px;
+    background: var(--panel);
+    padding: 24px;
+    box-shadow: 0 18px 60px rgba(10,17,20,0.08);
+  }
+  .kicker {
+    font-size: 11px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+  h1, h2 {
+    margin: 10px 0 16px;
+    font-family: var(--serif);
+    letter-spacing: -0.05em;
+    line-height: 0.95;
+  }
+  h1 { font-size: 52px; }
+  h2 { font-size: 34px; }
+  p {
+    margin: 0 0 14px;
+    line-height: 1.7;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  label {
+    display: block;
+    margin: 12px 0 6px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+  }
+  input, select, textarea {
+    width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 12px 14px;
+    font: inherit;
+    background: rgba(255,255,255,0.9);
+  }
+  textarea { min-height: 96px; resize: vertical; }
+  .stack { display: grid; gap: 18px; }
+  .row {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 18px;
+  }
+  .metric {
+    padding: 16px;
+    border-radius: 18px;
+    background: rgba(10,17,20,0.04);
+  }
+  .metric strong {
+    display: block;
+    margin-top: 8px;
+    font-size: 18px;
+    color: var(--ink-soft);
+  }
+  .list {
+    display: grid;
+    gap: 10px;
+  }
+  .card {
+    padding: 16px;
+    border-radius: 18px;
+    background: rgba(255,255,255,0.55);
+    border: 1px solid rgba(10,17,20,0.06);
+  }
+  .mono {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-soft);
+    word-break: break-word;
+  }
+  .hint {
+    padding: 14px 16px;
+    border-radius: 18px;
+    background: rgba(101,184,154,0.12);
+    border: 1px solid rgba(101,184,154,0.28);
+    color: var(--ink-soft);
+    font-size: 12px;
+    line-height: 1.65;
+  }
+  .status {
+    padding: 10px 12px;
+    border-radius: 14px;
+    background: rgba(200,154,69,0.14);
+    color: var(--ink-soft);
+    font-size: 12px;
+    line-height: 1.6;
+    margin-top: 14px;
+    white-space: pre-wrap;
+  }
+  @media (max-width: 980px) {
+    .grid { grid-template-columns: 1fr; }
+    .row, .metric-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <div class="brand">Flow<span>.</span></div>
+      <div class="actions">
+        <a class="btn" href="/">Landing</a>
+        <a class="btn" href="/dashboard">Dashboard</a>
+        <a class="btn" href="/present">Deck</a>
+        <button class="btn primary" id="logout-btn" type="button">Logout</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <aside class="stack">
+        <section class="panel">
+          <div class="kicker">Chain-Native Auth</div>
+          <h1>Sign in.</h1>
+          <p>
+            Flow supports EVM, TRON, BTC, and TON creator login. This portal keeps the auth flow intentionally low-level:
+            request a challenge, sign it with your wallet, then paste the resulting signature or TON proof fields.
+          </p>
+
+          <label for="family">Wallet family</label>
+          <select id="family">
+            <option value="evm">EVM / SIWE-style</option>
+            <option value="tron_gasfree">TRON / message signature</option>
+            <option value="btc">Bitcoin / BIP-322</option>
+            <option value="ton_gasless">TON / ton_proof</option>
+          </select>
+
+          <label for="network">Network</label>
+          <input id="network" value="polygon">
+
+          <label for="address">Wallet address</label>
+          <input id="address" placeholder="0x..., T..., bc1..., EQ...">
+
+          <label for="username">Creator username</label>
+          <input id="username" placeholder="alice_creates">
+
+          <button class="btn primary" id="challenge-btn" type="button">Create Challenge</button>
+
+          <label for="challenge-box">Challenge</label>
+          <textarea id="challenge-box" readonly placeholder="Challenge text appears here"></textarea>
+
+          <label for="signature">Signature</label>
+          <textarea id="signature" placeholder="Paste EVM, TRON, or BTC signature here"></textarea>
+
+          <label for="public-key">TON public key</label>
+          <input id="public-key" placeholder="Required for TON proof verification">
+
+          <label for="ton-proof">TON proof JSON</label>
+          <textarea id="ton-proof" placeholder='{"timestamp":..., "domain":{"value":"flow.local"}, "payload":"...", "signature":"..."}'></textarea>
+
+          <button class="btn" id="verify-btn" type="button">Verify and Open Session</button>
+          <div class="status" id="auth-status">No active session.</div>
+        </section>
+
+        <section class="panel">
+          <div class="kicker">Overlay</div>
+          <h2>OBS source.</h2>
+          <p>Add your Flow overlay as a browser source after saving a Rumble handle in the overlay settings panel.</p>
+          <div class="hint">
+            Browser source URL pattern:<br>
+            <span class="mono">/overlay/&lt;rumble-handle&gt;</span><br><br>
+            WebSocket updates stream from:<br>
+            <span class="mono">/ws/overlay/&lt;rumble-handle&gt;</span>
+          </div>
+        </section>
+      </aside>
+
+      <main class="stack">
+        <section class="panel">
+          <div class="kicker">Creator Profile</div>
+          <h2 id="creator-name">Portal locked</h2>
+          <div class="metric-grid">
+            <div class="metric"><div class="kicker">Preferred chain</div><strong id="metric-chain">-</strong></div>
+            <div class="metric"><div class="kicker">Payout address</div><strong id="metric-payout">-</strong></div>
+            <div class="metric"><div class="kicker">Admin wallet</div><strong id="metric-admin">-</strong></div>
+          </div>
+          <div class="list" id="round-list">
+            <div class="card">No creator session loaded yet.</div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="kicker">Revenue Splits</div>
+          <h2>Quadratic-aware payout policy.</h2>
+          <div class="row">
+            <div>
+              <label for="creator-bps">Creator bps</label>
+              <input id="creator-bps" value="8500">
+            </div>
+            <div>
+              <label for="pool-bps">Pool bps</label>
+              <input id="pool-bps" value="1000">
+            </div>
+          </div>
+          <label for="protocol-bps">Protocol bps</label>
+          <input id="protocol-bps" value="100">
+          <label for="collaborators">Collaborators JSON</label>
+          <textarea id="collaborators" placeholder='[{"address":"0x...","chain":"polygon","bps":400}]'></textarea>
+          <button class="btn primary" id="save-splits" type="button">Save splits</button>
+        </section>
+
+        <section class="panel">
+          <div class="kicker">Payout Destination</div>
+          <h2>Where settlement lands.</h2>
+          <div class="row">
+            <div>
+              <label for="payout-family">Family</label>
+              <select id="payout-family">
+                <option value="evm">EVM</option>
+                <option value="tron_gasfree">TRON GasFree</option>
+                <option value="btc">Bitcoin</option>
+                <option value="ton_gasless">TON Gasless</option>
+              </select>
+            </div>
+            <div>
+              <label for="payout-network">Network</label>
+              <input id="payout-network" value="polygon">
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label for="payout-token">Token</label>
+              <input id="payout-token" value="USDT">
+            </div>
+            <div>
+              <label for="payout-address">Address</label>
+              <input id="payout-address" placeholder="Destination address">
+            </div>
+          </div>
+          <button class="btn primary" id="save-payout" type="button">Save payout</button>
+        </section>
+
+        <section class="panel">
+          <div class="kicker">Overlay Settings</div>
+          <h2>Live stream surface.</h2>
+          <div class="row">
+            <div>
+              <label for="overlay-handle">Rumble handle</label>
+              <input id="overlay-handle" placeholder="aliceonrumble">
+            </div>
+            <div>
+              <label for="overlay-theme">Theme</label>
+              <input id="overlay-theme" value="gold">
+            </div>
+          </div>
+          <div class="row">
+            <div>
+              <label for="overlay-position">Position</label>
+              <input id="overlay-position" value="bottom-left">
+            </div>
+            <div>
+              <label for="overlay-color">Accent color</label>
+              <input id="overlay-color" value="#c89a45">
+            </div>
+          </div>
+          <button class="btn primary" id="save-overlay" type="button">Save overlay settings</button>
+        </section>
+      </main>
+    </div>
+  </div>
+
+<script>
+  const state = {
+    challenge: null,
+    seedPhrase: localStorage.getItem('flow_seed_phrase') || '',
+    sessionToken: localStorage.getItem('flow_session_token') || '',
+    creatorId: localStorage.getItem('flow_creator_id') || '',
+  };
+
+  const authStatus = document.getElementById('auth-status');
+
+  function headers() {
+    return state.sessionToken ? { Authorization: `Bearer ${state.sessionToken}` } : {};
+  }
+
+  function setStatus(message) {
+    authStatus.textContent = message;
+  }
+
+  async function requestChallenge() {
+    const res = await fetch('/api/auth/seed', {
+      method: 'POST',
+    });
+    const json = await res.json();
+    state.challenge = json;
+    if (res.ok && json.seedPhrase) {
+      state.seedPhrase = json.seedPhrase;
+      localStorage.setItem('flow_seed_phrase', state.seedPhrase);
+      document.getElementById('challenge-box').value = json.seedPhrase;
+      setStatus('Seed phrase generated. Store it securely, then continue with connect.');
+      return;
+    }
+    setStatus(json.error || 'Seed phrase generation failed.');
+  }
+
+  async function connectWithSeed() {
+    const family = document.getElementById('family').value;
+    const payload = {
+      network: document.getElementById('network').value.trim(),
+      username: document.getElementById('username').value.trim(),
+      creatorId: state.creatorId || undefined,
+      seedPhrase: document.getElementById('challenge-box').value.trim() || state.seedPhrase,
+    };
+    if (!payload.seedPhrase) {
+      setStatus('A seed phrase is required. Generate or paste one first.');
+      return;
+    }
+
+    const res = await fetch('/api/auth/connect', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        family,
+        network: payload.network,
+        username: payload.username || undefined,
+        creatorId: payload.creatorId,
+        seedPhrase: payload.seedPhrase,
+      }),
+    });
+    const json = await res.json();
+    if (!res.ok) {
+      setStatus(json.error || 'Verification failed.');
+      return;
+    }
+    state.sessionToken = json.sessionToken;
+    state.creatorId = json.creatorId;
+    localStorage.setItem('flow_session_token', state.sessionToken);
+    localStorage.setItem('flow_creator_id', state.creatorId);
+    setStatus(`Signed in as ${json.username}.`);
+    await loadPortal();
+  }
+
+  async function loadPortal() {
+    if (!state.sessionToken) {
+      return;
+    }
+    const res = await fetch('/api/creator/me', { headers: headers() });
+    const json = await res.json();
+    if (!res.ok) {
+      setStatus(json.error || 'Unable to load creator profile.');
+      return;
+    }
+
+    const { creator, payout, adminWallet, split, overlay, rounds } = json;
+    document.getElementById('creator-name').textContent = creator.username;
+    document.getElementById('metric-chain').textContent = creator.preferred_chain;
+    document.getElementById('metric-payout').textContent = payout ? payout.network : creator.payout_address;
+    document.getElementById('metric-admin').textContent = adminWallet ? `${adminWallet.family} ${adminWallet.address.slice(0, 12)}...` : 'Not linked';
+
+    document.getElementById('creator-bps').value = split?.creator_bps ?? 8500;
+    document.getElementById('pool-bps').value = split?.pool_bps ?? 1000;
+    document.getElementById('protocol-bps').value = split?.protocol_bps ?? 100;
+    document.getElementById('collaborators').value = split?.collaborators || '[]';
+
+    document.getElementById('payout-family').value = payout?.family || 'evm';
+    document.getElementById('payout-network').value = payout?.network || creator.preferred_chain;
+    document.getElementById('payout-token').value = payout?.token || 'USDT';
+    document.getElementById('payout-address').value = payout?.address || creator.payout_address;
+
+    document.getElementById('overlay-handle').value = overlay?.rumble_handle || '';
+    document.getElementById('overlay-theme').value = overlay?.theme || 'gold';
+    document.getElementById('overlay-position').value = overlay?.position || 'bottom-left';
+    document.getElementById('overlay-color').value = overlay?.accent_color || '#c89a45';
+
+    document.getElementById('round-list').innerHTML = (rounds || []).slice(0, 5).map(round => `
+      <div class="card">
+        <div class="kicker">Round ${round.round_number}</div>
+        <div class="mono">status: ${round.status}</div>
+        <div class="mono">matched: ${round.total_matched}</div>
+        <div class="mono">report: ${round.ipfs_url || 'pending'}</div>
+      </div>
+    `).join('') || '<div class="card">No rounds yet.</div>';
+  }
+
+  async function saveSplits() {
+    const collaboratorsText = document.getElementById('collaborators').value.trim();
+    let collaborators = [];
+    try {
+      collaborators = collaboratorsText ? JSON.parse(collaboratorsText) : [];
+    } catch (err) {
+      setStatus('Collaborators must be valid JSON.');
+      return;
+    }
+    const res = await fetch('/api/creator/splits', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers() },
+      body: JSON.stringify({
+        creator_bps: Number(document.getElementById('creator-bps').value),
+        pool_bps: Number(document.getElementById('pool-bps').value),
+        protocol_bps: Number(document.getElementById('protocol-bps').value),
+        collaborators,
+      }),
+    });
+    const json = await res.json();
+    setStatus(res.ok ? 'Split settings saved.' : (json.error || 'Unable to save splits.'));
+  }
+
+  async function savePayout() {
+    const res = await fetch('/api/creator/payout', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers() },
+      body: JSON.stringify({
+        family: document.getElementById('payout-family').value,
+        network: document.getElementById('payout-network').value,
+        token: document.getElementById('payout-token').value,
+        address: document.getElementById('payout-address').value,
+      }),
+    });
+    const json = await res.json();
+    setStatus(res.ok ? 'Payout destination saved.' : (json.error || 'Unable to save payout destination.'));
+  }
+
+  async function saveOverlay() {
+    const res = await fetch('/api/creator/overlay', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...headers() },
+      body: JSON.stringify({
+        rumble_handle: document.getElementById('overlay-handle').value,
+        theme: document.getElementById('overlay-theme').value,
+        position: document.getElementById('overlay-position').value,
+        accent_color: document.getElementById('overlay-color').value,
+      }),
+    });
+    const json = await res.json();
+    setStatus(res.ok ? 'Overlay settings saved.' : (json.error || 'Unable to save overlay settings.'));
+  }
+
+  async function logout() {
+    if (!state.sessionToken) return;
+    await fetch('/api/auth/logout', { method: 'POST', headers: headers() });
+    state.sessionToken = '';
+    state.creatorId = '';
+    localStorage.removeItem('flow_session_token');
+    localStorage.removeItem('flow_creator_id');
+    setStatus('Logged out.');
+  }
+
+  document.getElementById('challenge-btn').addEventListener('click', requestChallenge);
+  document.getElementById('verify-btn').addEventListener('click', connectWithSeed);
+  document.getElementById('save-splits').addEventListener('click', saveSplits);
+  document.getElementById('save-payout').addEventListener('click', savePayout);
+  document.getElementById('save-overlay').addEventListener('click', saveOverlay);
+  document.getElementById('logout-btn').addEventListener('click', logout);
+
+  if (state.sessionToken) {
+    setStatus('Existing session found. Loading creator portal...');
+    loadPortal();
+  }
+</script>
+</body>
+</html>

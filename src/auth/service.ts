@@ -1,38 +1,22 @@
 import crypto from 'crypto';
-import { ethers } from 'ethers';
-import TronWeb from 'tronweb';
-import { Verifier } from 'bip322-js';
-import { Address as TonAddress } from '@ton/core';
-import { sha256_sync, signVerify } from '@ton/crypto';
+import WDK from '@tetherto/wdk';
+import WalletManagerEvm from '@tetherto/wdk-wallet-evm';
+import WalletManagerTron from '@tetherto/wdk-wallet-tron';
+import WalletManagerBtc from '@tetherto/wdk-wallet-btc';
+import WalletManagerTon from '@tetherto/wdk-wallet-ton';
 import { config } from '../config/index.js';
-import { normalizeChain, type SupportedChain } from '../config/chains.js';
-import { AuthChallengesRepository } from '../storage/repositories/auth-challenges.js';
+import { getChainConfig, isTestnetEnabled, normalizeChain, type SupportedChain } from '../config/chains.js';
 import { AuthSessionsRepository } from '../storage/repositories/auth-sessions.js';
 import { CreatorAdminWalletsRepository } from '../storage/repositories/creator-admin-wallets.js';
 import { CreatorsRepository } from '../storage/repositories/creators.js';
-import type { AuthMethod, CreatorAdminWallet, WalletFamily } from '../types/flow.js';
+import type { AuthMethod, WalletFamily } from '../types/flow.js';
 
-interface CreateChallengeInput {
+interface ConnectManagedWalletInput {
   family: WalletFamily;
-  address: string;
-  network: string;
-  host: string;
-}
-
-interface VerifyChallengeInput {
-  family: WalletFamily;
-  address: string;
-  network: string;
-  signature?: string;
+  network?: string;
   username?: string;
   creatorId?: string;
-  publicKey?: string;
-  tonProof?: {
-    timestamp: number;
-    domain: { lengthBytes?: number; value: string };
-    payload: string;
-    signature: string;
-  };
+  seedPhrase: string;
 }
 
 function randomHex(bytes = 16): string {
@@ -54,175 +38,117 @@ function resolveAuthMethod(family: WalletFamily): AuthMethod {
   }
 }
 
-function toLittleEndianBytes(value: bigint, bytes: number): Buffer {
-  const out = Buffer.alloc(bytes);
-  let remaining = value;
-  for (let i = 0; i < bytes; i++) {
-    out[i] = Number(remaining & 0xffn);
-    remaining >>= 8n;
+function getDefaultNetworkForFamily(family: WalletFamily): SupportedChain {
+  switch (family) {
+    case 'evm':
+    case 'evm_erc4337':
+      return 'polygon';
+    case 'tron_gasfree':
+      return 'tron';
+    case 'btc':
+      return 'bitcoin';
+    case 'ton':
+    case 'ton_gasless':
+      return 'ton';
   }
-  return out;
 }
 
-export function buildTonProofMessage(address: string, proof: NonNullable<VerifyChallengeInput['tonProof']>): Uint8Array {
-  const parsed = TonAddress.parse(address);
-  const wc = Buffer.alloc(4);
-  wc.writeInt32BE(parsed.workChain, 0);
-  const domain = Buffer.from(proof.domain.value, 'utf8');
-  const domainLen = Buffer.alloc(4);
-  domainLen.writeUInt32LE(proof.domain.lengthBytes ?? domain.length, 0);
-  const timestamp = toLittleEndianBytes(BigInt(proof.timestamp), 8);
-  const payload = Buffer.from(proof.payload, 'utf8');
-  const message = Buffer.concat([
-    Buffer.from('ton-proof-item-v2/', 'utf8'),
-    wc,
-    parsed.hash,
-    domainLen,
-    domain,
-    timestamp,
-    payload,
-  ]);
-  const messageHash = sha256_sync(message);
-  return sha256_sync(Buffer.concat([Buffer.from([0xff, 0xff]), Buffer.from('ton-connect', 'utf8'), Buffer.from(messageHash)]));
+function isNetworkCompatibleWithFamily(family: WalletFamily, network: SupportedChain): boolean {
+  if (family === 'evm' || family === 'evm_erc4337') {
+    return ['ethereum', 'polygon', 'arbitrum', 'avalanche', 'celo'].includes(network);
+  }
+  if (family === 'tron_gasfree') return network === 'tron';
+  if (family === 'btc') return network === 'bitcoin';
+  return network === 'ton';
+}
+
+function validateSeedPhrase(seedPhrase: string): string {
+  const normalized = seedPhrase.trim().toLowerCase().replace(/\s+/g, ' ');
+  const wordCount = normalized.split(' ').length;
+  if (![12, 15, 18, 21, 24].includes(wordCount)) {
+    throw new Error('Seed phrase must contain 12, 15, 18, 21, or 24 words.');
+  }
+  return normalized;
+}
+
+function getEvmFallbackRpc(chain: SupportedChain): string {
+  switch (chain) {
+    case 'ethereum':
+      return 'https://eth.drpc.org';
+    case 'polygon':
+      return 'https://polygon-rpc.com';
+    case 'arbitrum':
+      return 'https://arb1.arbitrum.io/rpc';
+    case 'avalanche':
+      return 'https://api.avax.network/ext/bc/C/rpc';
+    case 'celo':
+      return 'https://forno.celo.org';
+    default:
+      return 'https://polygon-rpc.com';
+  }
 }
 
 export class AuthService {
-  private readonly challengesRepo = new AuthChallengesRepository();
   private readonly sessionsRepo = new AuthSessionsRepository();
   private readonly creatorsRepo = new CreatorsRepository();
   private readonly creatorAdminWalletsRepo = new CreatorAdminWalletsRepository();
 
-  createChallenge(input: CreateChallengeInput) {
-    const issuedAt = new Date();
-    const expiresAt = new Date(issuedAt.getTime() + config.AUTH_CHALLENGE_TTL_SECONDS * 1000);
-    const nonce = randomHex(8);
-    const uri = config.FLOW_PUBLIC_BASE_URL;
-    const statement = 'Sign in to Flow creator portal';
-    const challenge = [
-      `${input.host} wants you to sign in to Flow`,
-      `${input.address}`,
-      '',
-      statement,
-      '',
-      `URI: ${uri}`,
-      `Version: 1`,
-      `Chain: ${input.network}`,
-      `Nonce: ${nonce}`,
-      `Issued At: ${issuedAt.toISOString()}`,
-      `Expiration Time: ${expiresAt.toISOString()}`,
-    ].join('\n');
-
-    return this.challengesRepo.create({
-      family: input.family,
-      address: input.address,
-      network: input.network,
-      challenge,
-      nonce,
-      host: input.host,
-      payload_json: undefined,
-      expires_at: expiresAt.toISOString(),
-    });
+  static generateSeedPhrase(): string {
+    return WDK.getRandomSeedPhrase();
   }
 
-  private ensureCreator(input: VerifyChallengeInput): { id: string; username: string } {
-    if (input.creatorId) {
-      const existing = this.creatorsRepo.findById(input.creatorId);
-      if (!existing) {
-        throw new Error('Unknown creator.');
-      }
-      return { id: existing.id, username: existing.username };
+  private async deriveAddressFromSeed(seedPhrase: string, family: WalletFamily, network: SupportedChain): Promise<string> {
+    let wdk = new WDK(seedPhrase);
+
+    if (family === 'evm' || family === 'evm_erc4337') {
+      const rpc = getChainConfig(network).rpcUrl || getEvmFallbackRpc(network);
+      wdk = wdk.registerWallet(network, WalletManagerEvm, { provider: rpc });
+      const account = await wdk.getAccountByPath(network, "0'/0/0");
+      return await account.getAddress();
     }
 
-    if (input.username) {
-      const existing = this.creatorsRepo.findByUsername(input.username);
-      if (existing) {
-        return { id: existing.id, username: existing.username };
-      }
+    if (family === 'tron_gasfree') {
+      const rpc = getChainConfig('tron').rpcUrl || 'https://api.trongrid.io';
+      wdk = wdk.registerWallet('tron', WalletManagerTron, { provider: rpc });
+      const account = await wdk.getAccountByPath('tron', "0'/0/0");
+      return await account.getAddress();
+    }
 
-      const normalizedChain = normalizeChain(input.network) ?? ('polygon' as SupportedChain);
-      const created = this.creatorsRepo.create({
-        telegram_id: `wallet:${input.family}:${input.address.toLowerCase()}`,
-        username: input.username,
-        payout_address: input.address,
-        preferred_chain: normalizedChain,
+    if (family === 'btc') {
+      const host = process.env['BITCOIN_ELECTRUM_HOST']
+        ?? process.env['BITCOIN_TESTNET_ELECTRUM_URL']
+        ?? 'electrum.blockstream.info';
+      const port = Number(process.env['BITCOIN_ELECTRUM_PORT'] ?? '50001');
+      wdk = wdk.registerWallet('bitcoin', WalletManagerBtc as any, {
+        client: {
+          type: 'electrum',
+          clientConfig: { host, port },
+        },
+        network: isTestnetEnabled() ? 'testnet' : 'bitcoin',
       });
-      return { id: created.id, username: created.username };
+      const account = await wdk.getAccountByPath('bitcoin', "0'/0/0");
+      return await account.getAddress();
     }
 
-    const existingAdmin = this.creatorAdminWalletsRepo.findByAddress(input.address);
-    if (existingAdmin) {
-      return { id: existingAdmin.creatorId, username: this.creatorsRepo.findById(existingAdmin.creatorId)?.username ?? existingAdmin.address };
-    }
-
-    throw new Error('username or creatorId is required for first login.');
+    const tonRpcUrl = process.env['TON_RPC_URL']
+      ?? process.env['TON_TESTNET_RPC_URL']
+      ?? 'https://toncenter.com/api/v2/jsonRPC';
+    const tonApiUrl = process.env['TON_API_URL'] ?? 'https://tonapi.io/v3';
+    wdk = wdk.registerWallet('ton', WalletManagerTon as any, {
+      tonClient: { url: tonRpcUrl, secretKey: process.env['TON_RPC_API_KEY'] },
+      tonApiClient: { url: tonApiUrl, secretKey: process.env['TON_API_KEY'] },
+    });
+    const account = await wdk.getAccountByPath('ton', "0'/0/0");
+    return await account.getAddress();
   }
 
-  private verifyEvm(message: string, address: string, signature?: string): boolean {
-    if (!signature) return false;
-    return ethers.verifyMessage(message, signature).toLowerCase() === address.toLowerCase();
-  }
-
-  private verifyTron(message: string, address: string, signature?: string): boolean {
-    if (!signature) return false;
-    const recovered = TronWeb.utils.message.verifyMessage(message, signature, address);
-    return typeof recovered === 'string' ? recovered === address : Boolean(recovered);
-  }
-
-  private verifyBtc(message: string, address: string, signature?: string): boolean {
-    if (!signature) return false;
-    return Verifier.verifySignature(address, message, signature);
-  }
-
-  private verifyTon(address: string, publicKey: string | undefined, proof: VerifyChallengeInput['tonProof']): boolean {
-    if (!publicKey || !proof) return false;
-    const message = buildTonProofMessage(address, proof);
-    const signature = Buffer.from(proof.signature, 'base64');
-    const key = Buffer.from(publicKey, 'hex');
-    return signVerify(Buffer.from(message), signature, key);
-  }
-
-  verifyChallenge(input: VerifyChallengeInput) {
-    const challenge = this.challengesRepo.findActive(input.family, input.address);
-    if (!challenge) {
-      throw new Error('No active challenge found.');
-    }
-    if (Date.parse(challenge.expires_at) < Date.now()) {
-      throw new Error('Challenge expired.');
-    }
-
-    const message = challenge.challenge;
-    const verified =
-      (input.family === 'evm' || input.family === 'evm_erc4337') ? this.verifyEvm(message, input.address, input.signature)
-      : input.family === 'tron_gasfree' ? this.verifyTron(message, input.address, input.signature)
-      : input.family === 'btc' ? this.verifyBtc(message, input.address, input.signature)
-      : this.verifyTon(input.address, input.publicKey, input.tonProof);
-
-    if ((input.family === 'ton' || input.family === 'ton_gasless') && input.tonProof?.payload !== challenge.nonce) {
-      throw new Error('TON proof payload must match the issued challenge nonce.');
-    }
-
-    if (!verified) {
-      throw new Error('Signature verification failed.');
-    }
-
-    const creator = this.ensureCreator(input);
+  private createSessionForCreator(creator: { id: string; username: string }, family: WalletFamily, address: string) {
     const sessionToken = randomHex(24);
     const expiresAt = new Date(Date.now() + config.SESSION_TTL_HOURS * 60 * 60 * 1000).toISOString();
-
-    this.creatorAdminWalletsRepo.upsert({
-      creatorId: creator.id,
-      family: input.family,
-      network: input.network,
-      address: input.address,
-      auth_method: resolveAuthMethod(input.family),
-      public_key: input.publicKey,
-    });
-    this.challengesRepo.consume(challenge.id);
-
     const session = this.sessionsRepo.create({
       creator_id: creator.id,
-      family: input.family,
-      address: input.address,
+      family,
+      address,
       token: sessionToken,
       expires_at: expiresAt,
     });
@@ -232,6 +158,68 @@ export class AuthService {
       username: creator.username,
       sessionToken: session.token,
       expiresAt: session.expires_at,
+    };
+  }
+
+  async connectManagedWallet(input: ConnectManagedWalletInput) {
+    const fallbackNetwork = getDefaultNetworkForFamily(input.family);
+    const normalizedNetwork = normalizeChain(input.network) ?? fallbackNetwork;
+    if (!isNetworkCompatibleWithFamily(input.family, normalizedNetwork)) {
+      throw new Error(`Network ${normalizedNetwork} is not compatible with wallet family ${input.family}.`);
+    }
+
+    const seedPhrase = validateSeedPhrase(input.seedPhrase);
+    let address = '';
+    try {
+      address = await this.deriveAddressFromSeed(seedPhrase, input.family, normalizedNetwork);
+    } catch {
+      throw new Error('Unable to derive wallet address from the provided seed phrase.');
+    }
+
+    let creator = input.creatorId ? this.creatorsRepo.findById(input.creatorId) : null;
+    if (!creator && input.username) {
+      creator = this.creatorsRepo.findByUsername(input.username);
+    }
+    if (!creator) {
+      const existingAdmin = this.creatorAdminWalletsRepo.findByAddress(address);
+      if (existingAdmin) {
+        creator = this.creatorsRepo.findById(existingAdmin.creatorId);
+      }
+    }
+
+    if (!creator) {
+      if (!input.username) {
+        throw new Error('username is required for first login.');
+      }
+
+      creator = this.creatorsRepo.create({
+        telegram_id: `wdk:${input.family}:${address.toLowerCase()}`,
+        username: input.username,
+        payout_address: address,
+        preferred_chain: normalizedNetwork,
+      });
+    }
+
+    this.creatorsRepo.update(creator.id, {
+      telegram_id: `wdk:${input.family}:${address.toLowerCase()}`,
+      payout_address: address,
+      preferred_chain: normalizedNetwork,
+    });
+
+    this.creatorAdminWalletsRepo.upsert({
+      creatorId: creator.id,
+      family: input.family,
+      network: normalizedNetwork,
+      address,
+      auth_method: resolveAuthMethod(input.family),
+      public_key: undefined,
+    });
+
+    return {
+      ...this.createSessionForCreator({ id: creator.id, username: creator.username }, input.family, address),
+      address,
+      family: input.family,
+      network: normalizedNetwork,
     };
   }
 

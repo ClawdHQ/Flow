@@ -18,7 +18,7 @@ import {
   getRoundLeaderboardSnapshot,
 } from './data.js';
 import { rumbleWebhookRouter } from '../rumble/webhook.js';
-import { authService } from '../auth/service.js';
+import { AuthService, authService } from '../auth/service.js';
 import { CreatorsRepository } from '../storage/repositories/creators.js';
 import { CreatorAdminWalletsRepository } from '../storage/repositories/creator-admin-wallets.js';
 import { CreatorOverlaySettingsRepository } from '../storage/repositories/creator-overlay-settings.js';
@@ -136,39 +136,25 @@ export function createDashboardApp(): express.Express {
 
   app.use('/rumble', rumbleWebhookRouter);
 
-  app.post('/api/auth/:family/challenge', (req, res) => {
-    const family = req.params.family as WalletFamily;
-    const address = String(req.body.address ?? '').trim();
-    const network = String(req.body.network ?? 'polygon');
-    if (!address) {
-      res.status(400).json({ error: 'address is required' });
-      return;
-    }
-    const challenge = authService.createChallenge({
-      family,
-      address,
-      network,
-      host: req.headers.host ?? 'localhost',
+  app.post('/api/auth/seed', (_req, res) => {
+    res.json({
+      seedPhrase: AuthService.generateSeedPhrase(),
     });
-    res.json(challenge);
   });
 
-  app.post('/api/auth/:family/verify', (req, res) => {
+  app.post('/api/auth/connect', async (req, res) => {
     try {
-      const family = req.params.family as WalletFamily;
-      const result = authService.verifyChallenge({
+      const family = String(req.body.family ?? '').trim() as WalletFamily;
+      const result = await authService.connectManagedWallet({
         family,
-        address: String(req.body.address ?? '').trim(),
         network: String(req.body.network ?? 'polygon'),
-        signature: typeof req.body.signature === 'string' ? req.body.signature : undefined,
         username: typeof req.body.username === 'string' ? req.body.username : undefined,
         creatorId: typeof req.body.creatorId === 'string' ? req.body.creatorId : undefined,
-        publicKey: typeof req.body.publicKey === 'string' ? req.body.publicKey : undefined,
-        tonProof: req.body.tonProof,
+        seedPhrase: String(req.body.seedPhrase ?? ''),
       });
       res.json(result);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to verify signature';
+      const message = err instanceof Error ? err.message : 'Unable to connect wallet';
       res.status(400).json({ error: message });
     }
   });

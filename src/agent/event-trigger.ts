@@ -163,6 +163,9 @@ export class EventTriggerAgent {
       sybil_flagged: 0,
       message: event.message,
       confirmed_at: new Date().toISOString(),
+      protocol_fee: breakdown.protocolAmount.toString(),
+      pool_fee: breakdown.poolAmount.toString(),
+      creator_share: breakdown.creatorAmount.toString(),
     });
 
     await this.sybilDetector.analyzeTip(tip);
@@ -225,6 +228,9 @@ export class EventTriggerAgent {
       sybil_flagged: 0,
       message: `Mirrored Rumble native tip from ${event.chain}`,
       confirmed_at: new Date().toISOString(),
+      protocol_fee: breakdown.protocolAmount.toString(),
+      pool_fee: breakdown.poolAmount.toString(),
+      creator_share: breakdown.creatorAmount.toString(),
     });
 
     await this.sybilDetector.analyzeTip(tip);

@@ -1,8 +1,9 @@
 import { getDb } from '../storage/db.js';
 import { PoolMonitor } from './pool-monitor.js';
 import { RoundManager } from './round-manager.js';
-import { resumePendingTipConfirmations } from '../bot/tip-monitor.js';
+import { resumePendingTipConfirmations } from '../services/tip-monitor.js';
 import { RoundsRepository } from '../storage/repositories/rounds.js';
+import { startAgentApi } from '../server/api.js';
 import { logger } from '../utils/logger.js';
 import dotenv from 'dotenv';
 
@@ -30,18 +31,12 @@ async function bootstrap(): Promise<void> {
   poolMonitor.start();
   roundManager.start();
 
-  // Start bot if token is set
-  const token = process.env['TELEGRAM_BOT_TOKEN'];
-  if (token && token.length > 1) {
-    const { createBot } = await import('../bot/index.js');
-    const bot = createBot(token);
-    await bot.start();
-    await resumePendingTipConfirmations(bot);
-    logger.info('Telegram bot started');
-  } else {
-    await resumePendingTipConfirmations();
-    logger.warn('TELEGRAM_BOT_TOKEN not set, bot disabled');
-  }
+  // Resume pending tip confirmations
+  await resumePendingTipConfirmations();
+
+  // Start the agent API server (Rumble webhook + skill endpoints)
+  const port = parseInt(process.env['AGENT_PORT'] ?? '3001', 10);
+  startAgentApi(port);
 
   logger.info('✅ FLOW agent running');
 }

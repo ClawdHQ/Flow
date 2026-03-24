@@ -14,6 +14,10 @@ import { BridgeTransfersRepository } from '../storage/repositories/bridge-transf
 import { SettlementExecutionsRepository } from '../storage/repositories/settlement-executions.js';
 import { settlementNotifier } from '../notifications/settlement-notifier.js';
 import { overlayHub } from '../realtime/overlay-hub.js';
+import { EscrowWalletManager } from '../wallet/escrow.js';
+import { CreatorWalletManager } from '../wallet/creator.js';
+import { TipsRepository } from '../storage/repositories/tips.js';
+import { CreatorsRepository } from '../storage/repositories/creators.js';
 
 const roundsRepo = new RoundsRepository();
 const sybilDetector = new SybilDetector();
@@ -21,6 +25,10 @@ const poolWallet = new PoolWalletManager();
 const roundAllocationsRepo = new RoundAllocationsRepository();
 const bridgeTransfersRepo = new BridgeTransfersRepository();
 const settlementExecutionsRepo = new SettlementExecutionsRepository();
+const escrowManager = new EscrowWalletManager();
+const tipsRepo = new TipsRepository();
+const creatorsRepo = new CreatorsRepository();
+const creatorWallet = new CreatorWalletManager();
 
 function hashCanonical(value: unknown): string {
   return '0x' + crypto.createHash('sha256').update(canonicalJson(value)).digest('hex');
@@ -242,7 +250,22 @@ export class RoundManager {
 
   private async archiveRound(roundId: string, plan: AllocationPlan): Promise<void> {
     roundsRepo.updateStatus(roundId, 'archiving');
-    logger.info({ roundId }, 'Phase 6: Archiving round');
+    logger.info({ roundId }, 'Phase 6: Consolidating direct tips and archiving round');
+
+    // Consolidate escrows
+    const tips = tipsRepo.findConfirmedByRound(roundId).filter(t => t.escrow_address && t.status === 'confirmed');
+    for (const tip of tips) {
+      try {
+        const creator = creatorsRepo.findById(tip.creator_id);
+        if (creator) {
+          const accWallet = await creatorWallet.getOrCreateWallet(creator.id);
+          logger.info({ tipId: tip.id, creator: creator.username, target: accWallet.address }, 'Consolidating escrow for tip');
+          await escrowManager.consolidateAtRoundEnd(tip.id, accWallet.address);
+        }
+      } catch (err) {
+        logger.error({ err, tipId: tip.id }, 'Failed to consolidate escrow');
+      }
+    }
 
     const result = await publishRoundReport(roundId, plan);
     plan.signatures.reportCid = result.cid;

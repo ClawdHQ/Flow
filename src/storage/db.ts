@@ -1,10 +1,9 @@
 import Database from 'better-sqlite3';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { runMigrations } from './schema.js';
 
 let db: Database.Database | null = null;
-const projectRoot = path.dirname(fileURLToPath(new URL('../../package.json', import.meta.url)));
+const projectRoot = process.cwd();
 
 export function getDb(): Database.Database {
   if (!db) {

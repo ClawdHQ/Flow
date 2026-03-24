@@ -8,11 +8,14 @@ import { watchTipDeposit } from '../tip-monitor.js';
 import { usdtToBaseUnits, baseUnitsToUsdt } from '../../utils/math.js';
 import { v4 as uuidv4 } from 'uuid';
 import { logger } from '../../utils/logger.js';
+import { computeSplitBreakdown, getDefaultSplitConfig } from '../../agent/splits.js';
+import { SplitsRepository } from '../../storage/repositories/splits.js';
 
 const creatorsRepo = new CreatorsRepository();
 const tipsRepo = new TipsRepository();
 const roundsRepo = new RoundsRepository();
 const escrowManager = new EscrowWalletManager();
+const splitsRepo = new SplitsRepository();
 
 export async function handleTip(ctx: Context): Promise<void> {
   const text = ctx.message?.text ?? '';
@@ -45,6 +48,17 @@ export async function handleTip(ctx: Context): Promise<void> {
   }
 
   const amountBigInt = usdtToBaseUnits(amountStr);
+  const splitRecord = splitsRepo.findByCreatorId(creator.id);
+  const split = splitRecord ? {
+    creatorId: creator.id,
+    creatorBps: splitRecord.creator_bps,
+    poolBps: splitRecord.pool_bps,
+    protocolBps: splitRecord.protocol_bps,
+    collaborators: splitRecord.collaborators ? JSON.parse(splitRecord.collaborators) : []
+  } : getDefaultSplitConfig(creator.id);
+
+  const breakdown = computeSplitBreakdown(amountBigInt, split);
+
   const tip = tipsRepo.create({
     tip_uuid: uuidv4(),
     round_id: round.id,
@@ -57,6 +71,9 @@ export async function handleTip(ctx: Context): Promise<void> {
     sybil_weight: 1.0,
     sybil_flagged: 0,
     message: message || undefined,
+    protocol_fee: breakdown.protocolAmount.toString(),
+    pool_fee: breakdown.poolAmount.toString(),
+    creator_share: breakdown.creatorAmount.toString(),
   });
 
   let escrow;

@@ -1,7 +1,7 @@
 import pinoLib from 'pino';
 
-// pino types differ between ESM and CJS — cast to callable
-const pino = pinoLib as unknown as typeof pinoLib.default;
+// pino types differ between ESM and CJS — use the module directly
+const pino = (typeof pinoLib === 'function' ? pinoLib : (pinoLib as any).default) as typeof pinoLib;
 
 export const logger = pino({
   level: process.env['LOG_LEVEL'] ?? 'info',

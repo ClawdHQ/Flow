@@ -141,13 +141,3 @@ export interface AgentSkillInvocation {
   action: string;
   input: Record<string, unknown>;
 }
-
-export interface WalletAuthChallenge {
-  family: WalletFamily;
-  address: string;
-  challenge: string;
-  nonce: string;
-  issuedAt: string;
-  expiresAt: string;
-  host: string;
-}

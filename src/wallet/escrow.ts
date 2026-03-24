@@ -4,6 +4,8 @@ import type { SupportedChain } from '../config/chains.js';
 import { resolveSupportedChain } from './addresses.js';
 import { EscrowDbRecord, EscrowsRepository, EscrowStatus } from '../storage/repositories/escrows.js';
 import { logger } from '../utils/logger.js';
+import { TipsRepository } from '../storage/repositories/tips.js';
+import { getPoolHomeChain } from '../config/chains.js';
 
 export interface EscrowRecord {
   tipId: string;
@@ -22,8 +24,9 @@ export interface EscrowRecord {
 }
 
 interface EscrowWalletDependencies {
-  wallet?: Pick<WalletManager, 'createEscrowWallet' | 'getBalance' | 'sendUSDT'>;
+  wallet?: Pick<WalletManager, 'createEscrowWallet' | 'getBalance' | 'sendUSDT' | 'getPoolWallet'>;
   escrowsRepo?: EscrowsRepository;
+  tipsRepo?: TipsRepository;
   clock?: () => number;
   sleep?: (ms: number) => Promise<void>;
   confirmationTimeoutMs?: number;
@@ -53,8 +56,9 @@ function toEscrowRecord(record: EscrowDbRecord): EscrowRecord {
 }
 
 export class EscrowWalletManager {
-  private readonly wallet: Pick<WalletManager, 'createEscrowWallet' | 'getBalance' | 'sendUSDT'>;
+  private readonly wallet: Pick<WalletManager, 'createEscrowWallet' | 'getBalance' | 'sendUSDT' | 'getPoolWallet'>;
   private readonly escrowsRepo: EscrowsRepository;
+  private readonly tipsRepo: TipsRepository;
   private readonly clock: () => number;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly confirmationTimeoutMs: number;
@@ -63,6 +67,7 @@ export class EscrowWalletManager {
   constructor(dependencies: EscrowWalletDependencies = {}) {
     this.wallet = dependencies.wallet ?? walletManager;
     this.escrowsRepo = dependencies.escrowsRepo ?? new EscrowsRepository();
+    this.tipsRepo = dependencies.tipsRepo ?? new TipsRepository();
     this.clock = dependencies.clock ?? Date.now;
     this.sleep = dependencies.sleep ?? (ms => new Promise(resolve => setTimeout(resolve, ms)));
     this.confirmationTimeoutMs = dependencies.confirmationTimeoutMs ?? DEFAULT_CONFIRMATION_TIMEOUT_MS;
@@ -126,14 +131,40 @@ export class EscrowWalletManager {
   async consolidateAtRoundEnd(tipId: string, creatorAddress: string): Promise<string> {
     const record = this.findByTipId(tipId);
     if (!record) throw new Error(`Escrow record not found for tip ${tipId}`);
-    const result = await this.wallet.sendUSDT(
-      record.hdPath, creatorAddress, record.expectedAmount, record.chain
-    );
+    const tip = this.tipsRepo.findById(tipId);
+    if (!tip) throw new Error(`Tip not found for escrow ${tipId}`);
+
+    const creatorShare = BigInt(tip.creator_share || '0');
+    const poolFee = BigInt(tip.pool_fee || '0');
+    const protocolFee = BigInt(tip.protocol_fee || '0');
+
+    let mainTxHash = '';
+
+    // 1. Send creator share
+    if (creatorShare > 0n) {
+      const result = await this.wallet.sendUSDT(record.hdPath, creatorAddress, creatorShare, record.chain);
+      mainTxHash = result.txHash;
+    }
+
+    // 2. Send pool fee to pool home wallet
+    if (poolFee > 0n) {
+      const poolWallet = await this.wallet.getPoolWallet(getPoolHomeChain());
+      await this.wallet.sendUSDT(record.hdPath, poolWallet.address, poolFee, record.chain);
+    }
+
+    // 3. Send protocol fee to protocol admin address
+    if (protocolFee > 0n) {
+      // For demo, we derive a protocol admin address from the WDK at a fixed path
+      const protocolWallet = await this.wallet.createEscrowWallet(999999, getPoolHomeChain());
+      await this.wallet.sendUSDT(record.hdPath, protocolWallet.address, protocolFee, record.chain);
+    }
+
+    // 4. Status update
     this.escrowsRepo.update(tipId, {
       status: 'settled',
       settled_at: new Date(this.clock()).toISOString(),
     });
-    return result.txHash;
+    return mainTxHash;
   }
 
   async refundEscrow(tipId: string): Promise<string> {

@@ -67,7 +67,10 @@ export function runMigrations(db: Database.Database): void {
       message TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       confirmed_at TEXT,
-      settled_at TEXT
+      settled_at TEXT,
+      protocol_fee TEXT NOT NULL DEFAULT '0',
+      pool_fee TEXT NOT NULL DEFAULT '0',
+      creator_share TEXT NOT NULL DEFAULT '0'
     );
 
     CREATE TABLE IF NOT EXISTS wallets (
@@ -337,20 +340,6 @@ export function runMigrations(db: Database.Database): void {
       sent_at TEXT
     );
 
-    CREATE TABLE IF NOT EXISTS auth_challenges (
-      id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
-      family TEXT NOT NULL,
-      address TEXT NOT NULL,
-      network TEXT NOT NULL,
-      challenge TEXT NOT NULL,
-      nonce TEXT NOT NULL,
-      host TEXT NOT NULL,
-      payload_json TEXT,
-      expires_at TEXT NOT NULL,
-      consumed_at TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
     CREATE TABLE IF NOT EXISTS auth_sessions (
       id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
       creator_id TEXT NOT NULL REFERENCES creators(id) ON DELETE CASCADE,
@@ -390,4 +379,10 @@ export function runMigrations(db: Database.Database): void {
   ensureColumn(db, 'sybil_flags', 'confidence', 'REAL');
   ensureColumn(db, 'creators', 'profile_bio', 'TEXT');
   ensureColumn(db, 'creators', 'status_badges_json', 'TEXT');
+  ensureColumn(db, 'tips', 'protocol_fee', "TEXT NOT NULL DEFAULT '0'");
+  ensureColumn(db, 'tips', 'pool_fee', "TEXT NOT NULL DEFAULT '0'");
+  ensureColumn(db, 'tips', 'creator_share', "TEXT NOT NULL DEFAULT '0'");
+
+  // Legacy cleanup after challenge/verify auth flow removal
+  db.exec('DROP TABLE IF EXISTS auth_challenges');
 }

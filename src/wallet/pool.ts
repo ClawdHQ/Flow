@@ -16,6 +16,11 @@ export class PoolWalletManager {
     const info = await walletManager.getPoolWallet(this.chain);
     return walletManager.getBalance(info.address, info.chain, info.hdPath);
   }
+ 
+  async getProtocolBalance(): Promise<bigint> {
+    const info = await walletManager.createEscrowWallet(999999, this.chain);
+    return walletManager.getBalance(info.address, info.chain, info.hdPath);
+  }
 
   async transferUSDT(to: string, amount: bigint): Promise<string> {
     return this.transferToken(to, amount, 'USDT');

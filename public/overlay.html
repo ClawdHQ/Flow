@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1400">
+<title>Flow Overlay</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --gold: #d0a04c;
+    --mint: #62c0a1;
+    --red: #cc6558;
+    --ink: rgba(8, 13, 18, 0.84);
+    --line: rgba(255,255,255,0.12);
+    --text: #f7f3e9;
+    --sub: rgba(247,243,233,0.68);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    width: 1400px;
+    height: 200px;
+    overflow: hidden;
+    background: transparent;
+    color: var(--text);
+    font-family: "DM Mono", monospace;
+  }
+  .wrap {
+    position: relative;
+    width: 100%;
+    height: 100%;
+  }
+  .stack {
+    position: absolute;
+    left: 18px;
+    right: 18px;
+    bottom: 18px;
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 14px;
+  }
+  .panel {
+    border: 1px solid var(--line);
+    border-radius: 24px;
+    background: linear-gradient(135deg, rgba(12,20,26,0.9), rgba(17,34,41,0.82));
+    backdrop-filter: blur(16px);
+    box-shadow: 0 20px 50px rgba(0,0,0,0.25);
+  }
+  .pool {
+    min-width: 430px;
+    padding: 18px 20px;
+  }
+  .pool-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .kicker {
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--gold);
+  }
+  .round {
+    font-size: 9px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--sub);
+  }
+  .bar {
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    overflow: hidden;
+    margin-bottom: 14px;
+  }
+  .bar > div {
+    width: 0%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--gold), #e9c987);
+    transition: width 0.45s ease;
+  }
+  .metrics {
+    display: flex;
+    gap: 24px;
+  }
+  .metric strong {
+    display: block;
+    font-family: "Instrument Serif", Georgia, serif;
+    font-size: 24px;
+    line-height: 1;
+  }
+  .metric span {
+    display: block;
+    margin-top: 4px;
+    font-size: 8px;
+    color: var(--sub);
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+  }
+  .leaderboard {
+    min-width: 250px;
+    padding: 16px 18px;
+  }
+  .leader-row {
+    display: grid;
+    grid-template-columns: 16px 1fr auto;
+    gap: 10px;
+    padding-top: 10px;
+    margin-top: 10px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    font-size: 11px;
+  }
+  .leader-row:first-of-type { margin-top: 12px; }
+  .leader-row b { color: var(--gold); font-weight: 500; }
+  .leader-row span:last-child { color: var(--sub); }
+  .alert {
+    min-width: 320px;
+    max-width: 360px;
+    padding: 18px 18px 14px;
+    transform: translateY(14px);
+    opacity: 0;
+    transition: opacity 0.35s ease, transform 0.35s ease;
+  }
+  .alert.show {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  .alert strong {
+    display: block;
+    margin: 8px 0 2px;
+    font-family: "Instrument Serif", Georgia, serif;
+    font-size: 26px;
+    line-height: 1;
+  }
+  .alert p {
+    margin: 0;
+    line-height: 1.6;
+    color: var(--sub);
+    font-size: 11px;
+  }
+  .pulse {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 70% 50%, rgba(208,160,76,0.2), transparent 30%);
+    opacity: 0;
+    transition: opacity 0.35s ease;
+  }
+  .pulse.show { opacity: 1; }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="pulse" id="pulse"></div>
+    <div class="stack">
+      <section class="panel pool">
+        <div class="pool-top">
+          <div class="kicker">Flow Match Pool</div>
+          <div class="round" id="round-label">Waiting for round data</div>
+        </div>
+        <div class="bar"><div id="bar-fill"></div></div>
+        <div class="metrics">
+          <div class="metric">
+            <strong id="pool-total">$0.00</strong>
+            <span>Pool tracked</span>
+          </div>
+          <div class="metric">
+            <strong id="match-total">$0.00</strong>
+            <span>Projected match</span>
+          </div>
+          <div class="metric">
+            <strong id="supporters">0</strong>
+            <span>Supporters</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel leaderboard">
+        <div class="kicker">Current Leaders</div>
+        <div id="leaders">
+          <div class="leader-row"><b>1</b><span>Waiting</span><span>0</span></div>
+        </div>
+      </section>
+
+      <section class="panel alert" id="alert">
+        <div class="kicker" id="alert-type">Live event</div>
+        <strong id="alert-amount">$0.00</strong>
+        <p id="alert-copy">Waiting for Flow overlay events.</p>
+      </section>
+    </div>
+  </div>
+
+<script>
+  const handle = decodeURIComponent(location.pathname.split('/').pop() || 'demo');
+  const overlayStateUrl = `/api/overlay/${handle}/state`;
+  const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${wsProtocol}//${location.host}/ws/overlay/${handle}`;
+
+  const els = {
+    round: document.getElementById('round-label'),
+    pool: document.getElementById('pool-total'),
+    match: document.getElementById('match-total'),
+    supporters: document.getElementById('supporters'),
+    fill: document.getElementById('bar-fill'),
+    leaders: document.getElementById('leaders'),
+    alert: document.getElementById('alert'),
+    alertType: document.getElementById('alert-type'),
+    alertAmount: document.getElementById('alert-amount'),
+    alertCopy: document.getElementById('alert-copy'),
+    pulse: document.getElementById('pulse'),
+  };
+
+  function renderState(payload) {
+    const round = payload.round || {};
+    els.round.textContent = round.round_number ? `Round ${round.round_number} · ${round.status}` : 'No active round';
+    els.pool.textContent = round.total_direct_tips ? `$${round.total_direct_tips}` : '$0.00';
+    els.match.textContent = round.total_matched ? `+$${round.total_matched}` : '$0.00';
+    els.supporters.textContent = String(round.tipper_count || payload.creatorEntry?.unique_tippers || 0);
+    const tipperCount = Number(round.tipper_count || 0);
+    els.fill.style.width = `${Math.min(100, Math.max(8, tipperCount * 5))}%`;
+
+    const leaders = (payload.leaderboard || []).slice(0, 3);
+    els.leaders.innerHTML = leaders.length ? leaders.map((entry, index) => `
+      <div class="leader-row">
+        <b>${index + 1}</b>
+        <span>${entry.creator}</span>
+        <span>${entry.unique_tippers}</span>
+      </div>
+    `).join('') : '<div class="leader-row"><b>1</b><span>No creators yet</span><span>0</span></div>';
+  }
+
+  function flashAlert(type, amount, copy) {
+    els.alertType.textContent = type;
+    els.alertAmount.textContent = amount || 'Live';
+    els.alertCopy.textContent = copy || 'Flow event received.';
+    els.alert.classList.add('show');
+    els.pulse.classList.add('show');
+    clearTimeout(flashAlert.timer);
+    flashAlert.timer = setTimeout(() => {
+      els.alert.classList.remove('show');
+      els.pulse.classList.remove('show');
+    }, 4200);
+  }
+
+  async function bootstrap() {
+    try {
+      const res = await fetch(overlayStateUrl);
+      const json = await res.json();
+      renderState(json);
+    } catch (err) {
+      flashAlert('Overlay', 'Offline', 'Unable to load overlay state.');
+    }
+
+    const socket = new WebSocket(wsUrl);
+    socket.addEventListener('message', event => {
+      const data = JSON.parse(event.data);
+      if (data.type === 'overlay_state') {
+        renderState(data.payload);
+        return;
+      }
+      if (data.type === 'overlay_event') {
+        const payload = data.payload;
+        flashAlert(payload.title, payload.amount ? `$${payload.amount}` : payload.token || 'Live', payload.subtitle);
+      }
+    });
+  }
+
+  bootstrap();
+</script>
+</body>
+</html>

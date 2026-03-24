@@ -1,9 +1,8 @@
 import { z } from 'zod';
 import dotenv from 'dotenv';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const projectRoot = path.dirname(fileURLToPath(new URL('../../package.json', import.meta.url)));
+const projectRoot = process.cwd();
 dotenv.config({ path: path.join(projectRoot, '.env') });
 
 const envBoolean = z.preprocess(value => {
@@ -97,7 +96,6 @@ const baseSchema = z.object({
   DB_PATH: z.string().default('./flow.db'),
   DASHBOARD_PORT: z.coerce.number().int().positive().default(3000),
   DASHBOARD_SECRET: z.string().optional(),
-  AUTH_CHALLENGE_TTL_SECONDS: z.coerce.number().int().positive().default(300),
   SESSION_TTL_HOURS: z.coerce.number().int().positive().default(24),
 });
 
