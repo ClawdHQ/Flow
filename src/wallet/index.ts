@@ -5,7 +5,6 @@ import WalletManagerEvm from '@tetherto/wdk-wallet-evm';
 import WalletManagerEvmErc4337 from '@tetherto/wdk-wallet-evm-erc-4337';
 import WalletManagerTron from '@tetherto/wdk-wallet-tron';
 import WalletManagerTronGasfree from '@tetherto/wdk-wallet-tron-gasfree';
-import WalletManagerBtc from '@tetherto/wdk-wallet-btc';
 import WalletManagerTon from '@tetherto/wdk-wallet-ton';
 import WalletManagerTonGasless from '@tetherto/wdk-wallet-ton-gasless';
 import Usdt0ProtocolEvm from '@tetherto/wdk-protocol-bridge-usdt0-evm';
@@ -253,17 +252,9 @@ export class WalletManager {
     }
 
     // ── 5. Register Bitcoin wallet ─────────────────────────────────────────
-    const btcConfig = buildBtcConfig();
-    if (btcConfig) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        wdk = wdk.registerWallet('bitcoin', WalletManagerBtc as any, btcConfig);
-        this.registeredChains.add('bitcoin');
-        logger.info({ module: 'wallet' }, 'Registered Bitcoin (BIP-84 SegWit) wallet');
-      } catch (err) {
-        logger.warn({ module: 'wallet', err }, 'Failed to register Bitcoin wallet');
-      }
-    }
+    // NOTE: BTC WDK module depends on sodium-native, which is not available in
+    // Vercel serverless runtime. Keep Bitcoin disabled in Next runtime paths.
+    // (Agent/server process can still support BTC where native addons are available.)
 
     // ── 6. Register TON standard wallet ────────────────────────────────────
     const tonConfig = buildTonConfig();

@@ -1,13 +1,16 @@
 import { NextResponse } from 'next/server';
-
-async function getAuthServiceClass() {
-  const { AuthService } = await import('@/server/auth/service');
-  return AuthService;
-}
+import { ethers } from 'ethers';
 
 export async function POST() {
-  const AuthService = await getAuthServiceClass();
-  return NextResponse.json({
-    seedPhrase: AuthService.generateSeedPhrase(),
-  });
+  try {
+    const seedPhrase = ethers.Wallet.createRandom().mnemonic?.phrase;
+    if (!seedPhrase) {
+      return NextResponse.json({ error: 'Unable to generate seed phrase' }, { status: 500 });
+    }
+
+    return NextResponse.json({ seedPhrase });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unexpected error generating seed phrase';
+    return NextResponse.json({ error: message }, { status: 500 });
+  }
 }

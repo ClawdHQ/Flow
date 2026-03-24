@@ -53,7 +53,16 @@ export default function LoginPage() {
     setError('');
     try {
       const res = await fetch('/api/auth/seed', { method: 'POST' });
-      const data = await res.json().catch(() => ({ error: 'Unable to parse seed endpoint response' }));
+      const raw = await res.text();
+      let data: { seedPhrase?: string; error?: string } = {};
+      try {
+        data = raw ? JSON.parse(raw) as { seedPhrase?: string; error?: string } : {};
+      } catch {
+        if (!res.ok) {
+          throw new Error(raw || `Seed endpoint failed with status ${res.status}`);
+        }
+        throw new Error('Unable to parse seed endpoint response');
+      }
       if (!res.ok || !data.seedPhrase) {
         throw new Error(data.error ?? 'Unable to generate seed phrase');
       }

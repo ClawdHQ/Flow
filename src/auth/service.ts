@@ -2,7 +2,6 @@ import crypto from 'crypto';
 import WDK from '@tetherto/wdk';
 import WalletManagerEvm from '@tetherto/wdk-wallet-evm';
 import WalletManagerTron from '@tetherto/wdk-wallet-tron';
-import WalletManagerBtc from '@tetherto/wdk-wallet-btc';
 import WalletManagerTon from '@tetherto/wdk-wallet-ton';
 import { config } from '../config/index.js';
 import { getChainConfig, isTestnetEnabled, normalizeChain, type SupportedChain } from '../config/chains.js';
@@ -115,6 +114,11 @@ export class AuthService {
     }
 
     if (family === 'btc') {
+      if (process.env['VERCEL']) {
+        throw new Error('Bitcoin auth is disabled in Vercel serverless runtime.');
+      }
+      const btcModule = await import('@tetherto/wdk-wallet-btc');
+      const WalletManagerBtc = (btcModule as { default?: unknown }).default ?? btcModule;
       const host = process.env['BITCOIN_ELECTRUM_HOST']
         ?? process.env['BITCOIN_TESTNET_ELECTRUM_URL']
         ?? 'electrum.blockstream.info';
@@ -172,7 +176,10 @@ export class AuthService {
     let address = '';
     try {
       address = await this.deriveAddressFromSeed(seedPhrase, input.family, normalizedNetwork);
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.message.includes('disabled in Vercel serverless runtime')) {
+        throw err;
+      }
       throw new Error('Unable to derive wallet address from the provided seed phrase.');
     }
 
