@@ -18,6 +18,12 @@ export async function POST(request: NextRequest) {
   if (!WALLET_FAMILIES.has(family)) {
     return NextResponse.json({ error: 'Unsupported wallet family' }, { status: 400 });
   }
+  if (family === 'btc' && process.env['VERCEL']) {
+    return NextResponse.json(
+      { error: 'Bitcoin wallet login is not available on Vercel serverless runtime.' },
+      { status: 400 },
+    );
+  }
   if (!seedPhrase) {
     return NextResponse.json({ error: 'seedPhrase is required' }, { status: 400 });
   }

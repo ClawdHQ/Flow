@@ -4,7 +4,7 @@ import WalletManagerEvm from '@tetherto/wdk-wallet-evm';
 import WalletManagerTron from '@tetherto/wdk-wallet-tron';
 import WalletManagerTon from '@tetherto/wdk-wallet-ton';
 import { config } from '../config/index.js';
-import { getChainConfig, isTestnetEnabled, normalizeChain, type SupportedChain } from '../config/chains.js';
+import { getChainConfig, normalizeChain, type SupportedChain } from '../config/chains.js';
 import { AuthSessionsRepository } from '../storage/repositories/auth-sessions.js';
 import { CreatorAdminWalletsRepository } from '../storage/repositories/creator-admin-wallets.js';
 import { CreatorsRepository } from '../storage/repositories/creators.js';
@@ -114,24 +114,7 @@ export class AuthService {
     }
 
     if (family === 'btc') {
-      if (process.env['VERCEL']) {
-        throw new Error('Bitcoin auth is disabled in Vercel serverless runtime.');
-      }
-      const btcModule = await import('@tetherto/wdk-wallet-btc');
-      const WalletManagerBtc = (btcModule as { default?: unknown }).default ?? btcModule;
-      const host = process.env['BITCOIN_ELECTRUM_HOST']
-        ?? process.env['BITCOIN_TESTNET_ELECTRUM_URL']
-        ?? 'electrum.blockstream.info';
-      const port = Number(process.env['BITCOIN_ELECTRUM_PORT'] ?? '50001');
-      wdk = wdk.registerWallet('bitcoin', WalletManagerBtc as any, {
-        client: {
-          type: 'electrum',
-          clientConfig: { host, port },
-        },
-        network: isTestnetEnabled() ? 'testnet' : 'bitcoin',
-      });
-      const account = await wdk.getAccountByPath('bitcoin', "0'/0/0");
-      return await account.getAddress();
+      throw new Error('Bitcoin auth is currently unavailable in web runtime.');
     }
 
     const tonRpcUrl = process.env['TON_RPC_URL']
