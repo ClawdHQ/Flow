@@ -5,8 +5,8 @@ import WalletManagerEvm from '@tetherto/wdk-wallet-evm';
 import WalletManagerEvmErc4337 from '@tetherto/wdk-wallet-evm-erc-4337';
 import WalletManagerTron from '@tetherto/wdk-wallet-tron';
 import WalletManagerTronGasfree from '@tetherto/wdk-wallet-tron-gasfree';
-import WalletManagerTon from '@tetherto/wdk-wallet-ton';
-import WalletManagerTonGasless from '@tetherto/wdk-wallet-ton-gasless';
+// import WalletManagerTon from '@tetherto/wdk-wallet-ton';
+// import WalletManagerTonGasless from '@tetherto/wdk-wallet-ton-gasless';
 import Usdt0ProtocolEvm from '@tetherto/wdk-protocol-bridge-usdt0-evm';
 import { ethers } from 'ethers';
 import TronWeb from 'tronweb';
@@ -257,6 +257,9 @@ export class WalletManager {
     // (Agent/server process can still support BTC where native addons are available.)
 
     // ── 6. Register TON standard wallet ────────────────────────────────────
+    // NOTE: TON WDK module depends on sodium-native, which is not available in
+    // Vercel serverless runtime. Keeping it disabled for production/Next.js paths.
+    /*
     const tonConfig = buildTonConfig();
     if (tonConfig) {
       try {
@@ -281,6 +284,7 @@ export class WalletManager {
         logger.warn({ module: 'wallet', err }, 'Failed to register TON Gasless wallet');
       }
     }
+    */
 
     // ── 8. Register USDT0 Bridge Protocol on EVM chains ────────────────────
     for (const chain of SUPPORTED_CHAINS.filter(c => isEvmChain(c) && this.registeredChains.has(c))) {

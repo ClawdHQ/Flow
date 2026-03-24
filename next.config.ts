@@ -14,8 +14,6 @@ const nextConfig: NextConfig = {
     '@tetherto/wdk-wallet-evm-erc-4337',
     '@tetherto/wdk-wallet-tron',
     '@tetherto/wdk-wallet-tron-gasfree',
-    '@tetherto/wdk-wallet-ton',
-    '@tetherto/wdk-wallet-ton-gasless',
     '@tetherto/wdk-protocol-bridge-usdt0-evm',
     '@tetherto/wdk-protocol-fiat-moonpay',
     '@tetherto/wdk-pricing-bitfinex-http',

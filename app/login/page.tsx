@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/lib/auth-context';
+import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -21,8 +22,8 @@ type SeedMode = 'create' | 'import';
 const SUPPORTED_WALLETS = [
   { family: 'evm', label: 'WDK EVM Wallet', network: 'polygon', icon: '⬡', description: 'Ethereum, Polygon, Arbitrum, Avalanche, Celo' },
   { family: 'tron_gasfree', label: 'WDK TRON Wallet', network: 'tron', icon: '⚡', description: 'TRON Network (Gasfree)' },
-  { family: 'btc', label: 'WDK Bitcoin Wallet', network: 'bitcoin', icon: '₿', description: 'Bitcoin account via WDK wallet module' },
-  { family: 'ton_gasless', label: 'WDK TON Wallet', network: 'ton', icon: '◈', description: 'TON Network (Gasless)' },
+  { family: 'btc', label: 'WDK Bitcoin Wallet', network: 'bitcoin', icon: '₿', description: 'Bitcoin account via WDK wallet module', disabled: true },
+  { family: 'ton_gasless', label: 'WDK TON Wallet', network: 'ton', icon: '◈', description: 'TON Network (Gasless)', disabled: true },
 ] as const;
 
 export default function LoginPage() {
@@ -254,20 +255,32 @@ export default function LoginPage() {
 
           {step === 'select' && (
             <div className="space-y-3">
-              {SUPPORTED_WALLETS.map(wallet => (
-                <button
-                  key={wallet.family}
-                  onClick={() => handleConnect(wallet.family, wallet.network)}
-                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/30 hover:bg-muted/60 hover:border-primary/30 transition-all duration-200 text-left group cursor-pointer"
-                >
-                  <span className="text-2xl">{wallet.icon}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm group-hover:text-primary transition-colors">{wallet.label}</div>
-                    <div className="text-xs text-muted-foreground">{wallet.description}</div>
-                  </div>
-                  <Wallet className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />
-                </button>
-              ))}
+              {SUPPORTED_WALLETS.map(wallet => {
+                const isDisabled = 'disabled' in wallet && wallet.disabled;
+                return (
+                  <button
+                    key={wallet.family}
+                    disabled={isDisabled}
+                    onClick={() => handleConnect(wallet.family, wallet.network)}
+                    className={cn(
+                      "w-full flex items-center gap-4 p-4 rounded-xl border border-border bg-muted/30 transition-all duration-200 text-left group",
+                      isDisabled ? "opacity-50 cursor-not-allowed" : "hover:bg-muted/60 hover:border-primary/30 cursor-pointer"
+                    )}
+                  >
+                    <span className="text-2xl">{wallet.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <div className={cn("font-medium text-sm transition-colors", !isDisabled && "group-hover:text-primary")}>
+                          {wallet.label}
+                        </div>
+                        {isDisabled && <Badge variant="secondary" className="text-[10px] h-4 px-1">Coming Soon</Badge>}
+                      </div>
+                      <div className="text-xs text-muted-foreground">{wallet.description}</div>
+                    </div>
+                    {!isDisabled && <Wallet className="h-4 w-4 text-muted-foreground group-hover:text-primary transition-colors flex-shrink-0" />}
+                  </button>
+                );
+              })}
               <Button variant="outline" className="w-full" onClick={() => setStep('seed')} type="button">
                 Back to Seed Phrase
               </Button>
