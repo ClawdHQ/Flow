@@ -39,10 +39,10 @@ const nextConfig: NextConfig = {
     // Prevent sodium-native from crashing in serverless environment
     if (isServer) {
       config.externals.push('sodium-native');
-      // Some modules might try to require it directly
+      // Force fallback to pure JS sodium
       config.resolve.alias = {
         ...config.resolve.alias,
-        'sodium-native': false,
+        'sodium-native': 'sodium-javascript',
       };
     }
     return config;
