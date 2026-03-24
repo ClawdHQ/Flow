@@ -2,12 +2,13 @@ import crypto from 'crypto';
 import WDK from '@tetherto/wdk';
 import WalletManagerEvm from '@tetherto/wdk-wallet-evm';
 import WalletManagerTron from '@tetherto/wdk-wallet-tron';
-import WalletManagerTon from '@tetherto/wdk-wallet-ton';
+// import WalletManagerTon from '@tetherto/wdk-wallet-ton';
 import { config } from '../config/index.js';
 import { getChainConfig, normalizeChain, type SupportedChain } from '../config/chains.js';
 import { AuthSessionsRepository } from '../storage/repositories/auth-sessions.js';
 import { CreatorAdminWalletsRepository } from '../storage/repositories/creator-admin-wallets.js';
 import { CreatorsRepository } from '../storage/repositories/creators.js';
+import { isSupabaseConfigured, sbFindOne, sbInsert, sbUpdate, sbUpsert } from '../storage/supabase.js';
 import type { AuthMethod, WalletFamily } from '../types/flow.js';
 
 interface ConnectManagedWalletInput {
@@ -117,6 +118,7 @@ export class AuthService {
       throw new Error('Bitcoin auth is currently unavailable in web runtime.');
     }
 
+    /*
     const tonRpcUrl = process.env['TON_RPC_URL']
       ?? process.env['TON_TESTNET_RPC_URL']
       ?? 'https://toncenter.com/api/v2/jsonRPC';
@@ -127,11 +129,30 @@ export class AuthService {
     });
     const account = await wdk.getAccountByPath('ton', "0'/0/0");
     return await account.getAddress();
+    */
+    throw new Error('TON auth is temporarily disabled in production runtime.');
   }
 
-  private createSessionForCreator(creator: { id: string; username: string }, family: WalletFamily, address: string) {
+  private async createSessionForCreator(creator: { id: string; username: string }, family: WalletFamily, address: string) {
     const sessionToken = randomHex(24);
     const expiresAt = new Date(Date.now() + config.SESSION_TTL_HOURS * 60 * 60 * 1000).toISOString();
+
+    if (isSupabaseConfigured()) {
+      const session = await sbInsert<any>('auth_sessions', {
+        creator_id: creator.id,
+        family,
+        address,
+        token: sessionToken,
+        expires_at: expiresAt,
+      });
+      return {
+        creatorId: creator.id,
+        username: creator.username,
+        sessionToken: session.token,
+        expiresAt: session.expires_at,
+      };
+    }
+
     const session = this.sessionsRepo.create({
       creator_id: creator.id,
       family,
@@ -160,20 +181,30 @@ export class AuthService {
     try {
       address = await this.deriveAddressFromSeed(seedPhrase, input.family, normalizedNetwork);
     } catch (err) {
-      if (err instanceof Error && err.message.includes('disabled in Vercel serverless runtime')) {
+      if (err instanceof Error && err.message.includes('disabled in production runtime')) {
         throw err;
       }
       throw new Error('Unable to derive wallet address from the provided seed phrase.');
     }
 
-    let creator = input.creatorId ? this.creatorsRepo.findById(input.creatorId) : null;
-    if (!creator && input.username) {
-      creator = this.creatorsRepo.findByUsername(input.username);
-    }
-    if (!creator) {
-      const existingAdmin = this.creatorAdminWalletsRepo.findByAddress(address);
-      if (existingAdmin) {
-        creator = this.creatorsRepo.findById(existingAdmin.creatorId);
+    let creator: any = null;
+    if (isSupabaseConfigured()) {
+      if (input.creatorId) creator = await sbFindOne('creators', { id: input.creatorId });
+      if (!creator && input.username) creator = await sbFindOne('creators', { username: input.username });
+      if (!creator) {
+        const admin = await sbFindOne<any>('creator_admin_wallets', { address: address });
+        if (admin) creator = await sbFindOne('creators', { id: admin.creator_id });
+      }
+    } else {
+      creator = input.creatorId ? this.creatorsRepo.findById(input.creatorId) : null;
+      if (!creator && input.username) {
+        creator = this.creatorsRepo.findByUsername(input.username);
+      }
+      if (!creator) {
+        const existingAdmin = this.creatorAdminWalletsRepo.findByAddress(address);
+        if (existingAdmin) {
+          creator = this.creatorsRepo.findById(existingAdmin.creatorId);
+        }
       }
     }
 
@@ -182,50 +213,92 @@ export class AuthService {
         throw new Error('username is required for first login.');
       }
 
-      creator = this.creatorsRepo.create({
+      const newCreator = {
         telegram_id: `wdk:${input.family}:${address.toLowerCase()}`,
         username: input.username,
         payout_address: address,
         preferred_chain: normalizedNetwork,
-      });
+      };
+
+      if (isSupabaseConfigured()) {
+        creator = await sbInsert<any>('creators', newCreator);
+      } else {
+        creator = this.creatorsRepo.create(newCreator);
+      }
+    } else {
+      const updates = {
+        telegram_id: `wdk:${input.family}:${address.toLowerCase()}`,
+        payout_address: address,
+        preferred_chain: normalizedNetwork,
+      };
+
+      if (isSupabaseConfigured()) {
+        await sbUpdate('creators', { id: creator.id }, updates);
+      } else {
+        this.creatorsRepo.update(creator.id, updates);
+      }
     }
 
-    this.creatorsRepo.update(creator.id, {
-      telegram_id: `wdk:${input.family}:${address.toLowerCase()}`,
-      payout_address: address,
-      preferred_chain: normalizedNetwork,
-    });
-
-    this.creatorAdminWalletsRepo.upsert({
-      creatorId: creator.id,
+    const adminWallet = {
+      creator_id: creator.id,
       family: input.family,
       network: normalizedNetwork,
       address,
       auth_method: resolveAuthMethod(input.family),
-      public_key: undefined,
-    });
+    };
 
+    if (isSupabaseConfigured()) {
+      await sbUpsert('creator_admin_wallets', adminWallet, ['creator_id', 'family', 'network', 'address']);
+    } else {
+      this.creatorAdminWalletsRepo.upsert({
+        creatorId: creator.id,
+        family: input.family,
+        network: normalizedNetwork,
+        address,
+        auth_method: resolveAuthMethod(input.family),
+        public_key: undefined,
+      });
+    }
+
+    const session = await this.createSessionForCreator({ id: creator.id, username: creator.username }, input.family, address);
     return {
-      ...this.createSessionForCreator({ id: creator.id, username: creator.username }, input.family, address),
+      ...session,
       address,
       family: input.family,
       network: normalizedNetwork,
     };
   }
 
-  getSession(token: string | undefined | null) {
+  async getSession(token: string | undefined | null) {
     if (!token) return null;
-    const session = this.sessionsRepo.findByToken(token);
+    let session: any = null;
+
+    if (isSupabaseConfigured()) {
+      session = await sbFindOne('auth_sessions', { token });
+    } else {
+      session = this.sessionsRepo.findByToken(token);
+    }
+
     if (!session) return null;
     if (Date.parse(session.expires_at) < Date.now()) {
-      this.sessionsRepo.revoke(token);
+      if (isSupabaseConfigured()) {
+        const { sbDelete } = await import('../storage/supabase.js');
+        await sbDelete('auth_sessions', { token });
+      } else {
+        this.sessionsRepo.revoke(token);
+      }
       return null;
     }
     return session;
   }
 
-  logout(token: string): void {
-    this.sessionsRepo.revoke(token);
+  async logout(token: string): Promise<void> {
+    if (isSupabaseConfigured()) {
+      const { sbDelete } = await import('../storage/supabase.js');
+      await sbDelete('auth_sessions', { token });
+    } else {
+      this.sessionsRepo.revoke(token);
+    }
   }
 }
 

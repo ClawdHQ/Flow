@@ -7,7 +7,6 @@ const nextConfig: NextConfig = {
   reactStrictMode: true,
 
   serverExternalPackages: [
-    'better-sqlite3',
     'pino',
     '@tetherto/wdk',
     '@tetherto/wdk-wallet-evm',
@@ -19,9 +18,7 @@ const nextConfig: NextConfig = {
     '@tetherto/wdk-pricing-bitfinex-http',
     '@tetherto/wdk-pricing-provider',
     'tronweb',
-    'bip322-js',
     '@ton/core',
-    '@ton/crypto',
     'ethers',
     'node-cron',
     '@anthropic-ai/sdk',
