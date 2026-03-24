@@ -68,13 +68,13 @@ function getSessionToken(req: express.Request): string | undefined {
   return undefined;
 }
 
-function requireCreatorSession(req: express.Request, res: express.Response, next: express.NextFunction): void {
-  const session = authService.getSession(getSessionToken(req));
+async function requireCreatorSession(req: express.Request, res: express.Response, next: express.NextFunction): Promise<void> {
+  const session = await authService.getSession(getSessionToken(req));
   if (!session) {
     res.status(401).json({ error: 'Unauthorized' });
     return;
   }
-  (req as express.Request & { flowSession?: ReturnType<typeof authService.getSession> }).flowSession = session;
+  (req as express.Request & { flowSession?: any }).flowSession = session;
   next();
 }
 
@@ -136,9 +136,9 @@ export function createDashboardApp(): express.Express {
 
   app.use('/rumble', rumbleWebhookRouter);
 
-  app.post('/api/auth/seed', (_req, res) => {
+  app.post('/api/auth/seed', async (_req, res) => {
     res.json({
-      seedPhrase: AuthService.generateSeedPhrase(),
+      seedPhrase: await authService.generateSeedPhrase(),
     });
   });
 
@@ -159,10 +159,10 @@ export function createDashboardApp(): express.Express {
     }
   });
 
-  app.post('/api/auth/logout', requireCreatorSession, (req, res) => {
+  app.post('/api/auth/logout', requireCreatorSession, async (req, res) => {
     const token = getSessionToken(req);
     if (token) {
-      authService.logout(token);
+      await authService.logout(token);
     }
     res.json({ ok: true });
   });

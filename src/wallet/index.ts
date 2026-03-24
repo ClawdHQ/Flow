@@ -1,15 +1,6 @@
 import '../config/index.js';
 import crypto from 'crypto';
-import WDK from '@tetherto/wdk';
-import WalletManagerEvm from '@tetherto/wdk-wallet-evm';
-import WalletManagerEvmErc4337 from '@tetherto/wdk-wallet-evm-erc-4337';
-import WalletManagerTron from '@tetherto/wdk-wallet-tron';
-import WalletManagerTronGasfree from '@tetherto/wdk-wallet-tron-gasfree';
-// import WalletManagerTon from '@tetherto/wdk-wallet-ton';
-// import WalletManagerTonGasless from '@tetherto/wdk-wallet-ton-gasless';
-import Usdt0ProtocolEvm from '@tetherto/wdk-protocol-bridge-usdt0-evm';
 import { ethers } from 'ethers';
-import TronWeb from 'tronweb';
 import {
   getChainConfig,
   getDefaultChain,
@@ -69,101 +60,8 @@ function makeDemoHash(prefix: string): string {
   return `0x${prefix}${crypto.randomBytes(28).toString('hex')}`.slice(0, 66);
 }
 
-// ─── Environment helpers for optional WDK module configs ────────────────────
-
 function env(key: string): string | undefined {
   return process.env[key]?.trim() || undefined;
-}
-
-function buildErc4337Config(chain: SupportedChain) {
-  const chainCfg = getChainConfig(chain);
-  const bundlerUrl = env(`${chain.toUpperCase()}_BUNDLER_URL`);
-  const paymasterUrl = env(`${chain.toUpperCase()}_PAYMASTER_URL`);
-  const paymasterAddress = env(`${chain.toUpperCase()}_PAYMASTER_ADDRESS`);
-  const entryPointAddress = env('ERC4337_ENTRYPOINT_ADDRESS') ?? '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789';
-
-  if (!chainCfg.rpcUrl || !bundlerUrl) return null;
-
-  const base = {
-    chainId: chainCfg.chainId,
-    provider: chainCfg.rpcUrl,
-    bundlerUrl,
-    entryPointAddress,
-    safeModulesVersion: '0.3.0',
-  };
-
-  // If paymaster is configured, use sponsored mode for pool settlement
-  if (paymasterUrl && paymasterAddress) {
-    return {
-      ...base,
-      isSponsored: true as const,
-      paymasterUrl,
-      paymasterAddress,
-    };
-  }
-
-  // Otherwise use native coins
-  return { ...base, useNativeCoins: true as const };
-}
-
-function buildTronGasfreeConfig() {
-  const chainCfg = getChainConfig('tron');
-  const gasFreeProvider = env('TRON_GASFREE_PROVIDER_URL');
-  const gasFreeApiKey = env('TRON_GASFREE_API_KEY');
-  const gasFreeApiSecret = env('TRON_GASFREE_API_SECRET');
-  const serviceProvider = env('TRON_GASFREE_SERVICE_PROVIDER');
-  const verifyingContract = env('TRON_GASFREE_VERIFYING_CONTRACT');
-
-  if (!chainCfg.rpcUrl || !gasFreeProvider || !gasFreeApiKey || !gasFreeApiSecret || !serviceProvider) {
-    return null;
-  }
-
-  return {
-    chainId: '728126428',
-    provider: chainCfg.rpcUrl,
-    gasFreeProvider,
-    gasFreeApiKey,
-    gasFreeApiSecret,
-    serviceProvider,
-    verifyingContract: verifyingContract ?? serviceProvider,
-  };
-}
-
-function buildTonConfig() {
-  const tonRpcUrl = env('TON_RPC_URL') ?? env('TON_TESTNET_RPC_URL');
-  const tonApiUrl = env('TON_API_URL') ?? 'https://tonapi.io/v3';
-  if (!tonRpcUrl) return null;
-  return {
-    tonClient: { url: tonRpcUrl, secretKey: env('TON_RPC_API_KEY') },
-    tonApiClient: { url: tonApiUrl, secretKey: env('TON_API_KEY') },
-  };
-}
-
-function buildTonGaslessConfig() {
-  const base = buildTonConfig();
-  const paymasterAddress = env('TON_PAYMASTER_TOKEN_ADDRESS');
-  if (!base || !paymasterAddress) return null;
-  return {
-    ...base,
-    paymasterToken: { address: paymasterAddress },
-    transferMaxFee: BigInt(env('TON_TRANSFER_MAX_FEE') ?? '1000000000'),
-  };
-}
-
-function buildBtcConfig() {
-  const electrumHost = env('BITCOIN_ELECTRUM_HOST') ?? env('BITCOIN_TESTNET_ELECTRUM_URL');
-  if (!electrumHost) return null;
-  const isTestnet = isTestnetEnabled();
-  return {
-    client: {
-      type: 'electrum' as const,
-      clientConfig: {
-        host: electrumHost,
-        port: Number(env('BITCOIN_ELECTRUM_PORT') ?? '50001'),
-      },
-    },
-    network: isTestnet ? 'testnet' as const : 'bitcoin' as const,
-  };
 }
 
 // ─── Main WalletManager ─────────────────────────────────────────────────────
@@ -174,37 +72,36 @@ export class WalletManager {
   private encryptionKey: Buffer;
   private seedPhrase: string;
 
-  // Track which modules were successfully registered
   private registeredChains = new Set<string>();
   private registeredProtocols = new Map<string, Set<string>>();
+  private initialized = false;
 
   constructor() {
     const seedPhrase = process.env['WDK_SEED_PHRASE'] ?? '';
     const encKey = process.env['WDK_ENCRYPTION_KEY'] ?? 'default-32-char-encryption-key!!';
     this.encryptionKey = Buffer.from(encKey.padEnd(32, '0').slice(0, 32), 'utf8');
     this.seedPhrase = seedPhrase || 'test test test test test test test test test test test junk';
-    this.wdk = this._buildWdk();
   }
 
-  private _normalizeChain(chain?: string | null): SupportedChain {
-    return normalizeChain(chain) ?? getDefaultChain();
-  }
+  /** Ensures WDK and all modules are loaded. Called lazily on first logic use. */
+  private async _ensureInitialized() {
+    if (this.initialized) return;
 
-  private _buildWdk() {
+    const { default: WDK } = await import('@tetherto/wdk');
     const usingTestSeed = !process.env['WDK_SEED_PHRASE'];
     if (usingTestSeed) {
       logger.warn({ module: 'wallet' }, 'WDK_SEED_PHRASE not set — using test seed. Do NOT use in production.');
     }
 
-    let wdk = new WDK(this.seedPhrase);
+    this.wdk = new WDK(this.seedPhrase);
 
     // ── 1. Register EVM wallet modules for all EVM chains ──────────────────
+    const { default: WalletManagerEvm } = await import('@tetherto/wdk-wallet-evm');
     for (const chain of SUPPORTED_CHAINS.filter(c => isEvmChain(c))) {
       const rpcUrl = getChainConfig(chain).rpcUrl?.trim();
       if (!rpcUrl) continue;
-      const walletConfig = { provider: rpcUrl };
       try {
-        wdk = wdk.registerWallet(chain, WalletManagerEvm, walletConfig);
+        this.wdk = this.wdk.registerWallet(chain, WalletManagerEvm, { provider: rpcUrl });
         this.registeredChains.add(chain);
         logger.info({ module: 'wallet', chain }, 'Registered EVM wallet');
       } catch (err) {
@@ -214,11 +111,11 @@ export class WalletManager {
 
     // ── 2. Register EVM ERC-4337 (Account Abstraction) for pool settlement ─
     const poolChain = getPoolHomeChain();
-    const erc4337Config = buildErc4337Config(poolChain);
+    const erc4337Config = this._buildErc4337Config(poolChain);
     if (erc4337Config) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        wdk = wdk.registerWallet(`${poolChain}_erc4337`, WalletManagerEvmErc4337 as any, erc4337Config);
+        const { default: WalletManagerEvmErc4337 } = await import('@tetherto/wdk-wallet-evm-erc-4337');
+        this.wdk = this.wdk.registerWallet(`${poolChain}_erc4337`, WalletManagerEvmErc4337 as any, erc4337Config);
         this.registeredChains.add(`${poolChain}_erc4337`);
         logger.info({ module: 'wallet', chain: `${poolChain}_erc4337` }, 'Registered EVM ERC-4337 wallet (pool settlement)');
       } catch (err) {
@@ -230,7 +127,8 @@ export class WalletManager {
     const tronRpc = getChainConfig('tron').rpcUrl?.trim();
     if (tronRpc) {
       try {
-        wdk = wdk.registerWallet('tron', WalletManagerTron, { provider: tronRpc });
+        const { default: WalletManagerTron } = await import('@tetherto/wdk-wallet-tron');
+        this.wdk = this.wdk.registerWallet('tron', WalletManagerTron, { provider: tronRpc });
         this.registeredChains.add('tron');
         logger.info({ module: 'wallet' }, 'Registered TRON wallet');
       } catch (err) {
@@ -239,11 +137,11 @@ export class WalletManager {
     }
 
     // ── 4. Register TRON Gas-Free wallet (for creator payouts) ─────────────
-    const tronGasfreeConfig = buildTronGasfreeConfig();
+    const tronGasfreeConfig = this._buildTronGasfreeConfig();
     if (tronGasfreeConfig) {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        wdk = wdk.registerWallet('tron_gasfree', WalletManagerTronGasfree as any, tronGasfreeConfig);
+        const { default: WalletManagerTronGasfree } = await import('@tetherto/wdk-wallet-tron-gasfree');
+        this.wdk = this.wdk.registerWallet('tron_gasfree', WalletManagerTronGasfree as any, tronGasfreeConfig);
         this.registeredChains.add('tron_gasfree');
         logger.info({ module: 'wallet' }, 'Registered TRON Gas-Free wallet');
       } catch (err) {
@@ -251,47 +149,12 @@ export class WalletManager {
       }
     }
 
-    // ── 5. Register Bitcoin wallet ─────────────────────────────────────────
-    // NOTE: BTC WDK module depends on sodium-native, which is not available in
-    // Vercel serverless runtime. Keep Bitcoin disabled in Next runtime paths.
-    // (Agent/server process can still support BTC where native addons are available.)
-
-    // ── 6. Register TON standard wallet ────────────────────────────────────
-    // NOTE: TON WDK module depends on sodium-native, which is not available in
-    // Vercel serverless runtime. Keeping it disabled for production/Next.js paths.
-    /*
-    const tonConfig = buildTonConfig();
-    if (tonConfig) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        wdk = wdk.registerWallet('ton', WalletManagerTon as any, tonConfig);
-        this.registeredChains.add('ton');
-        logger.info({ module: 'wallet' }, 'Registered TON wallet');
-      } catch (err) {
-        logger.warn({ module: 'wallet', err }, 'Failed to register TON wallet');
-      }
-    }
-
-    // ── 7. Register TON Gasless wallet ─────────────────────────────────────
-    const tonGaslessConfig = buildTonGaslessConfig();
-    if (tonGaslessConfig) {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        wdk = wdk.registerWallet('ton_gasless', WalletManagerTonGasless as any, tonGaslessConfig);
-        this.registeredChains.add('ton_gasless');
-        logger.info({ module: 'wallet' }, 'Registered TON Gasless wallet');
-      } catch (err) {
-        logger.warn({ module: 'wallet', err }, 'Failed to register TON Gasless wallet');
-      }
-    }
-    */
-
-    // ── 8. Register USDT0 Bridge Protocol on EVM chains ────────────────────
+    // ── 5. Register USDT0 Bridge Protocol on EVM chains ────────────────────
+    const { default: Usdt0ProtocolEvm } = await import('@tetherto/wdk-protocol-bridge-usdt0-evm');
     for (const chain of SUPPORTED_CHAINS.filter(c => isEvmChain(c) && this.registeredChains.has(c))) {
       try {
         const maxFee = BigInt(env('BRIDGE_MAX_FEE_WEI') ?? '100000000000000'); // 0.0001 ETH
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        wdk = wdk.registerProtocol(chain, 'usdt0', Usdt0ProtocolEvm as any, { bridgeMaxFee: maxFee });
+        this.wdk = this.wdk.registerProtocol(chain, 'usdt0', Usdt0ProtocolEvm as any, { bridgeMaxFee: maxFee });
         if (!this.registeredProtocols.has(chain)) this.registeredProtocols.set(chain, new Set());
         this.registeredProtocols.get(chain)!.add('usdt0');
         logger.info({ module: 'wallet', chain }, 'Registered USDT0 bridge protocol');
@@ -300,163 +163,105 @@ export class WalletManager {
       }
     }
 
+    this.initialized = true;
     logger.info(
       { module: 'wallet', chains: [...this.registeredChains], protocols: Object.fromEntries(this.registeredProtocols) },
-      'WDK initialized with all available modules'
+      'WDK initialized'
     );
-    return wdk;
   }
 
-  // ── Public accessors for registered modules ─────────────────────────────
+  private _buildErc4337Config(chain: SupportedChain) {
+    const chainCfg = getChainConfig(chain);
+    const bundlerUrl = env(`${chain.toUpperCase()}_BUNDLER_URL`);
+    const paymasterUrl = env(`${chain.toUpperCase()}_PAYMASTER_URL`);
+    const paymasterAddress = env(`${chain.toUpperCase()}_PAYMASTER_ADDRESS`);
+    const entryPointAddress = env('ERC4337_ENTRYPOINT_ADDRESS') ?? '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789';
 
-  getRegisteredChains(): string[] {
-    return [...this.registeredChains];
+    if (!chainCfg.rpcUrl || !bundlerUrl) return null;
+
+    const base = {
+      chainId: chainCfg.chainId,
+      provider: chainCfg.rpcUrl,
+      bundlerUrl,
+      entryPointAddress,
+      safeModulesVersion: '0.3.0',
+    };
+
+    if (paymasterUrl && paymasterAddress) {
+      return { ...base, isSponsored: true as const, paymasterUrl, paymasterAddress };
+    }
+    return { ...base, useNativeCoins: true as const };
   }
 
-  getRegisteredProtocols(chain: string): string[] {
-    return [...(this.registeredProtocols.get(chain) ?? [])];
+  private _buildTronGasfreeConfig() {
+    const chainCfg = getChainConfig('tron');
+    const gasFreeProvider = env('TRON_GASFREE_PROVIDER_URL');
+    const gasFreeApiKey = env('TRON_GASFREE_API_KEY');
+    const gasFreeApiSecret = env('TRON_GASFREE_API_SECRET');
+    const serviceProvider = env('TRON_GASFREE_SERVICE_PROVIDER');
+    const verifyingContract = env('TRON_GASFREE_VERIFYING_CONTRACT');
+
+    if (!chainCfg.rpcUrl || !gasFreeProvider || !gasFreeApiKey || !gasFreeApiSecret || !serviceProvider) {
+      return null;
+    }
+
+    return {
+      chainId: '728126428',
+      provider: chainCfg.rpcUrl,
+      gasFreeProvider,
+      gasFreeApiKey,
+      gasFreeApiSecret,
+      serviceProvider,
+      verifyingContract: verifyingContract ?? serviceProvider,
+    };
   }
 
-  isChainRegistered(chain: string): boolean {
-    return this.registeredChains.has(chain);
+  private _normalizeChain(chain?: string | null): SupportedChain {
+    return normalizeChain(chain) ?? getDefaultChain();
   }
-
-  // ── HD path helpers ──────────────────────────────────────────────────────
 
   private _stripHdPrefix(hdPath: string, chain: SupportedChain): string {
     const prefix = getHdPathPrefix(chain);
-    return hdPath.startsWith(`${prefix}/`)
-      ? hdPath.replace(`${prefix}/`, '')
-      : hdPath;
-  }
-
-  private _getActiveRpcUrl(chain: SupportedChain): string | undefined {
-    const rpcUrl = getChainConfig(chain).rpcUrl?.trim();
-    return rpcUrl ? rpcUrl : undefined;
+    return hdPath.startsWith(`${prefix}/`) ? hdPath.replace(`${prefix}/`, '') : hdPath;
   }
 
   private _getUsdtAddress(chain: SupportedChain): string | undefined {
-    const tokenAddress = getChainConfig(chain).usdtAddress?.trim();
-    return tokenAddress ? tokenAddress : undefined;
-  }
-
-  private _getTokenAddress(token: SupportedToken, chain: SupportedChain): string | undefined {
-    return getActiveTokenAddress(token, chain);
+    return getChainConfig(chain).usdtAddress?.trim();
   }
 
   private _canUseWdk(chain: SupportedChain): boolean {
-    // Now all chains are potentially WDK-supported if registered
     return this.registeredChains.has(chain)
       || this.registeredChains.has(`${chain}_gasfree`)
       || this.registeredChains.has(`${chain}_gasless`);
   }
 
-  private _isLiveNativeChain(chain: SupportedChain): boolean {
-    if (chain === 'bitcoin') return config.FLOW_ENABLE_LIVE_BTC_WALLET;
-    if (chain === 'ton') return config.FLOW_ENABLE_LIVE_TON_WALLET;
-    return true;
-  }
-
-  private async _getEvmTokenBalance(address: string, chain: SupportedChain): Promise<bigint> {
-    const chainConfig = getChainConfig(chain);
-    if (!chainConfig.rpcUrl || !chainConfig.usdtAddress) {
-      return 0n;
-    }
-
-    const provider = new ethers.JsonRpcProvider(
-      chainConfig.rpcUrl,
-      { chainId: chainConfig.chainId, name: chain },
-    );
-    const token = new ethers.Contract(chainConfig.usdtAddress, ERC20_BALANCE_OF_ABI, provider);
-    const normalizedAddress = normalizeWalletAddress(address, chain);
-    return await token.balanceOf(normalizedAddress) as bigint;
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private async _deriveAccount(chain: string, suffix: string): Promise<any> {
-    return this.wdk.getAccountByPath(chain, suffix);
-  }
-
-  private async _buildWalletInfo(chain: SupportedChain, role: WalletRole, index: number): Promise<WalletInfo> {
-    const registration = role === 'pool' ? getPoolRegistration() : getWalletRegistration(chain, role, index);
-    const effectiveChain = role === 'pool' ? getPoolHomeChain() : chain;
-    const wdkChain = role === 'pool' && this.registeredChains.has(`${effectiveChain}_erc4337`)
-      ? `${effectiveChain}_erc4337`
-      : effectiveChain;
-
-    if (this._canUseWdk(effectiveChain)) {
-      try {
-        const account = await this._deriveAccount(wdkChain, this._stripHdPrefix(registration.hdPath, effectiveChain));
-        const address = await account.getAddress();
-        return {
-          address,
-          hdPath: registration.hdPath,
-          chain: effectiveChain,
-          family: registration.family,
-          role,
-          capabilities: registration.capabilities,
-          liveMode: registration.live,
-        };
-      } catch {
-        // Fall through to demo address
-      }
-    }
-
-    return {
-      address: deriveDemoAddress(effectiveChain, role, index),
-      hdPath: registration.hdPath,
-      chain: effectiveChain,
-      family: registration.family,
-      role,
-      capabilities: registration.capabilities,
-      liveMode: false,
-    };
-  }
-
-  async getPoolWallet(chain: SupportedChain = getPoolHomeChain()): Promise<WalletInfo> {
-    return this._buildWalletInfo(chain, 'pool', 0);
-  }
-
-  async getCreatorWallet(creatorIndex: number, chain: SupportedChain = getDefaultChain()): Promise<WalletInfo> {
-    return this._buildWalletInfo(chain, 'creator', creatorIndex);
-  }
-
-  async createEscrowWallet(tipIndex: number, chain: SupportedChain = getDefaultChain()): Promise<WalletInfo> {
-    return this._buildWalletInfo(chain, 'escrow', tipIndex);
+  async getRegisteredChains(): Promise<string[]> {
+    await this._ensureInitialized();
+    return [...this.registeredChains];
   }
 
   async getBalance(address: string, chain: string, hdPath?: string): Promise<bigint> {
+    await this._ensureInitialized();
     try {
       const normalizedChain = this._normalizeChain(chain);
-      if (!this._canUseWdk(normalizedChain) || !this._isLiveNativeChain(normalizedChain)) {
-        return 0n;
-      }
+      if (!this._canUseWdk(normalizedChain)) return 0n;
 
       const tokenAddress = this._getUsdtAddress(normalizedChain);
-      if (!this._getActiveRpcUrl(normalizedChain) || !tokenAddress) {
-        return 0n;
-      }
+      if (!getChainConfig(normalizedChain).rpcUrl || !tokenAddress) return 0n;
 
       if (isEvmChain(normalizedChain)) {
         try {
-          return await this._getEvmTokenBalance(address, normalizedChain);
-        } catch (err) {
-          logger.warn(
-            { module: 'wallet', action: 'evm_balance_fallback', address, chain: normalizedChain, err },
-            'Direct ERC-20 USD₮ balance lookup failed, falling back to WDK.'
-          );
-        }
+          const chainConfig = getChainConfig(normalizedChain);
+          const provider = new ethers.JsonRpcProvider(chainConfig.rpcUrl, { chainId: chainConfig.chainId, name: normalizedChain });
+          const token = new ethers.Contract(tokenAddress, ERC20_BALANCE_OF_ABI, provider);
+          return await token.balanceOf(normalizeWalletAddress(address, normalizedChain)) as bigint;
+        } catch { /* fallback to WDK */ }
       }
 
-      if (!hdPath) {
-        return 0n;
-      }
-      const suffix = this._stripHdPrefix(hdPath, normalizedChain);
-      const account = await this._deriveAccount(normalizedChain, suffix);
+      if (!hdPath) return 0n;
+      const account = await this.wdk.getAccountByPath(normalizedChain, this._stripHdPrefix(hdPath, normalizedChain));
       return await (account.getTokenBalance(tokenAddress) as Promise<bigint>);
-    } catch {
-      return 0n;
-    }
+    } catch { return 0n; }
   }
 
   async sendUSDT(fromPath: string, to: string, amount: bigint, chain: string): Promise<TransactionResult> {
@@ -464,67 +269,68 @@ export class WalletManager {
   }
 
   async sendToken(fromPath: string, to: string, amount: bigint, token: SupportedToken, chain: string): Promise<TransactionResult> {
+    await this._ensureInitialized();
     const normalizedChain = this._normalizeChain(chain);
 
-    if (token === 'BTC' && normalizedChain !== 'bitcoin') {
-      throw new Error('BTC transfers not yet supported via EVM WDK');
-    }
-
-    if (!this._canUseWdk(normalizedChain) || !this._isLiveNativeChain(normalizedChain)) {
-      return {
-        txHash: makeDemoHash('demo'),
-        success: true,
-        mode: 'demo',
-      };
+    if (!this._canUseWdk(normalizedChain)) {
+      return { txHash: makeDemoHash('demo'), success: true, mode: 'demo' };
     }
 
     try {
-      const tokenAddress = this._getTokenAddress(token, normalizedChain);
-      if (!tokenAddress) {
-        throw new Error(`${token} address not configured for ${normalizedChain}`);
-      }
+      const tokenAddress = getActiveTokenAddress(token, normalizedChain);
+      if (!tokenAddress) throw new Error(`${token} address not configured`);
 
-      // Use gasfree variant for tron creator payouts if available
-      const wdkChain = normalizedChain === 'tron' && this.registeredChains.has('tron_gasfree')
-        ? 'tron_gasfree'
-        : normalizedChain === 'ton' && this.registeredChains.has('ton_gasless')
-          ? 'ton_gasless'
-          : normalizedChain;
-
-      const suffix = this._stripHdPrefix(fromPath, normalizedChain);
-      const account = await this._deriveAccount(wdkChain, suffix);
-      const result = await account.transfer({
-        token: tokenAddress,
-        recipient: to,
-        amount,
-      }) as { hash: string };
-      logger.info(
-        {
-          module: 'wallet',
-          action: 'token_sent',
-          token,
-          txHash: result.hash,
-          fromPath,
-          to,
-          amount: amount.toString(),
-          chain: normalizedChain,
-          wdkChain,
-        },
-        'Token transfer executed'
-      );
+      const wdkChain = normalizedChain === 'tron' && this.registeredChains.has('tron_gasfree') ? 'tron_gasfree' : normalizedChain;
+      const account = await this.wdk.getAccountByPath(wdkChain, this._stripHdPrefix(fromPath, normalizedChain));
+      const result = await account.transfer({ token: tokenAddress, recipient: to, amount }) as { hash: string };
       return { txHash: result.hash, success: true };
     } catch (err) {
-      logger.warn(
-        { module: 'wallet', action: 'mock_transfer', token, to, amount: amount.toString(), chain, err },
-        'Demo mode transfer fallback engaged.'
-      );
+      logger.warn({ module: 'wallet', err }, 'Transfer failed, fallback to demo');
       return { txHash: makeDemoHash('mock'), success: true, mode: 'demo' };
     }
   }
 
+  async getPoolWallet(chain: SupportedChain = getPoolHomeChain()): Promise<WalletInfo> {
+    await this._ensureInitialized();
+    const reg = getPoolRegistration();
+    const wdkChain = this.registeredChains.has(`${chain}_erc4337`) ? `${chain}_erc4337` : chain;
+    try {
+      const account = await this.wdk.getAccountByPath(wdkChain, this._stripHdPrefix(reg.hdPath, chain));
+      const address = await account.getAddress();
+      return { address, hdPath: reg.hdPath, chain, family: reg.family, role: 'pool', liveMode: reg.live };
+    } catch {
+      return { address: deriveDemoAddress(chain, 'pool', 0), hdPath: reg.hdPath, chain, role: 'pool', liveMode: false };
+    }
+  }
+
+  async getCreatorWallet(creatorIndex: number, chain: SupportedChain = getDefaultChain()): Promise<WalletInfo> {
+    await this._ensureInitialized();
+    const reg = getWalletRegistration(chain, 'creator', creatorIndex);
+    try {
+      const account = await this.wdk.getAccountByPath(chain, this._stripHdPrefix(reg.hdPath, chain));
+      const address = await account.getAddress();
+      return { address, hdPath: reg.hdPath, chain, family: reg.family, role: 'creator', liveMode: reg.live };
+    } catch {
+      return { address: deriveDemoAddress(chain, 'creator', creatorIndex), hdPath: reg.hdPath, chain, role: 'creator', liveMode: false };
+    }
+  }
+
+  async createEscrowWallet(tipIndex: number, chain: SupportedChain = getDefaultChain()): Promise<WalletInfo> {
+    await this._ensureInitialized();
+    const reg = getWalletRegistration(chain, 'escrow', tipIndex);
+    try {
+      const account = await this.wdk.getAccountByPath(chain, this._stripHdPrefix(reg.hdPath, chain));
+      const address = await account.getAddress();
+      return { address, hdPath: reg.hdPath, chain, family: reg.family, role: 'escrow', liveMode: reg.live };
+    } catch {
+      return { address: deriveDemoAddress(chain, 'escrow', tipIndex), hdPath: reg.hdPath, chain, role: 'escrow', liveMode: false };
+    }
+  }
+
   async signMessage(hdPath: string, message: string, chain: string = getDefaultChain()): Promise<string> {
+    await this._ensureInitialized();
     const normalizedChain = this._normalizeChain(chain);
-    if (!this._canUseWdk(normalizedChain) || !this._isLiveNativeChain(normalizedChain)) {
+    if (!this._canUseWdk(normalizedChain)) {
       return '0x' + crypto.createHmac('sha256', this.encryptionKey).update(`${hdPath}:${message}:${normalizedChain}`).digest('hex');
     }
 
@@ -532,8 +338,7 @@ export class WalletManager {
       return '0x' + crypto.createHmac('sha256', this.encryptionKey).update(`${hdPath}:${message}:tron`).digest('hex');
     }
 
-    const suffix = this._stripHdPrefix(hdPath, normalizedChain);
-    const account = await this._deriveAccount(normalizedChain, suffix);
+    const account = await this.wdk.getAccountByPath(normalizedChain, this._stripHdPrefix(hdPath, normalizedChain));
     return account.sign(message) as Promise<string>;
   }
 
@@ -575,81 +380,52 @@ export class WalletManager {
     return { txHash: mockHash, success: true, mode: 'direct' };
   }
 
-  // ── USDT0 Bridge Operations ──────────────────────────────────────────────
-
   async bridgeUsdt0(targetChain: SupportedChain, amount: bigint, recipient: string): Promise<TransactionResult> {
-    if (!isBridgeEligibleChain(targetChain) || targetChain === getPoolHomeChain()) {
-      return {
-        txHash: makeDemoHash('direct'),
-        success: true,
-        mode: 'direct',
-      };
-    }
-
-    if (!config.FLOW_ENABLE_LIVE_USDT0_BRIDGE) {
-      return {
-        txHash: makeDemoHash('bridge'),
-        approveHash: makeDemoHash('approve'),
-        resetAllowanceHash: makeDemoHash('reset'),
-        success: true,
-        mode: 'bridge',
-      };
-    }
-
+    await this._ensureInitialized();
     const sourceChain = getPoolHomeChain();
-    if (!this.registeredProtocols.get(sourceChain)?.has('usdt0')) {
-      logger.warn({ targetChain }, 'USDT0 bridge protocol not registered for pool chain, falling back to demo');
+    if (!isBridgeEligibleChain(targetChain) || targetChain === sourceChain) {
+      return { txHash: makeDemoHash('direct'), success: true, mode: 'direct' };
+    }
+
+    if (!config.FLOW_ENABLE_LIVE_USDT0_BRIDGE || !this.registeredProtocols.get(sourceChain)?.has('usdt0')) {
       return { txHash: makeDemoHash('bridge'), success: true, mode: 'bridge' };
     }
 
     try {
       const poolWallet = await this.getPoolWallet();
-      const suffix = this._stripHdPrefix(poolWallet.hdPath, sourceChain);
-      const account = await this._deriveAccount(sourceChain, suffix);
+      const account = await this.wdk.getAccountByPath(sourceChain, this._stripHdPrefix(poolWallet.hdPath, sourceChain));
       const bridge = account.getBridgeProtocol('usdt0');
       const tokenAddress = this._getUsdtAddress(sourceChain);
-      if (!tokenAddress) throw new Error('No USDT address for source chain');
+      if (!tokenAddress) throw new Error('No USDT address');
 
-      const result = await bridge.bridge({
-        targetChain,
-        recipient,
-        token: tokenAddress,
-        amount,
-      }) as { hash: string; fee: bigint; bridgeFee: bigint };
-
-      logger.info({ targetChain, amount: amount.toString(), recipient, hash: result.hash }, 'USDT0 bridge executed');
+      const result = await bridge.bridge({ targetChain, recipient, token: tokenAddress, amount }) as { hash: string };
       return { txHash: result.hash, success: true, mode: 'bridge' };
     } catch (err) {
-      logger.error({ targetChain, amount: amount.toString(), recipient, err }, 'USDT0 bridge failed');
+      logger.error({ targetChain, err }, 'Bridge failed');
       return { txHash: makeDemoHash('bridge'), success: true, mode: 'bridge' };
     }
   }
 
   async quoteBridge(sourceChain: SupportedChain, targetChain: SupportedChain, amount: bigint, recipient: string): Promise<BridgeQuote> {
+    await this._ensureInitialized();
     if (!this.registeredProtocols.get(sourceChain)?.has('usdt0')) {
       return { fee: 0n, bridgeFee: 0n };
     }
 
     try {
-      const account = await this._deriveAccount(sourceChain, "0'/0/0");
+      const account = await this.wdk.getAccountByPath(sourceChain, "0'/0/0");
       const bridge = account.getBridgeProtocol('usdt0');
       const tokenAddress = this._getUsdtAddress(sourceChain);
       if (!tokenAddress) return { fee: 0n, bridgeFee: 0n };
 
-      return await bridge.quoteBridge({
-        targetChain,
-        recipient,
-        token: tokenAddress,
-        amount,
-      }) as BridgeQuote;
+      return await bridge.quoteBridge({ targetChain, recipient, token: tokenAddress, amount }) as BridgeQuote;
     } catch {
       return { fee: 0n, bridgeFee: 0n };
     }
   }
 
-  // ── Fee Rates ────────────────────────────────────────────────────────────
-
   async getFeeRates(chain: SupportedChain): Promise<{ normal: bigint; fast: bigint }> {
+    await this._ensureInitialized();
     if (!this.registeredChains.has(chain)) {
       return { normal: 0n, fast: 0n };
     }
@@ -659,8 +435,6 @@ export class WalletManager {
       return { normal: 0n, fast: 0n };
     }
   }
-
-  // ── Encryption ───────────────────────────────────────────────────────────
 
   encryptKeyMaterial(data: string): string {
     const iv = crypto.randomBytes(16);

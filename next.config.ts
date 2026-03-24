@@ -30,11 +30,21 @@ const nextConfig: NextConfig = {
 
   // Webpack extensionAlias lets .js imports resolve to .ts source files
   // (required because src/ server code uses Node ESM .js extension convention)
-  webpack: (config) => {
+  webpack: (config, { isServer }) => {
     config.resolve.extensionAlias = {
       '.js': ['.ts', '.tsx', '.js', '.jsx'],
       '.mjs': ['.mts', '.mjs'],
     };
+
+    // Prevent sodium-native from crashing in serverless environment
+    if (isServer) {
+      config.externals.push('sodium-native');
+      // Some modules might try to require it directly
+      config.resolve.alias = {
+        ...config.resolve.alias,
+        'sodium-native': false,
+      };
+    }
     return config;
   },
 

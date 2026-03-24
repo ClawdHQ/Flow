@@ -1,8 +1,4 @@
 import crypto from 'crypto';
-import WDK from '@tetherto/wdk';
-import WalletManagerEvm from '@tetherto/wdk-wallet-evm';
-import WalletManagerTron from '@tetherto/wdk-wallet-tron';
-// import WalletManagerTon from '@tetherto/wdk-wallet-ton';
 import { config } from '../config/index.js';
 import { getChainConfig, normalizeChain, type SupportedChain } from '../config/chains.js';
 import { AuthSessionsRepository } from '../storage/repositories/auth-sessions.js';
@@ -93,14 +89,17 @@ export class AuthService {
   private readonly creatorsRepo = new CreatorsRepository();
   private readonly creatorAdminWalletsRepo = new CreatorAdminWalletsRepository();
 
-  static generateSeedPhrase(): string {
+  async generateSeedPhrase(): Promise<string> {
+    const { default: WDK } = await import('@tetherto/wdk');
     return WDK.getRandomSeedPhrase();
   }
 
   private async deriveAddressFromSeed(seedPhrase: string, family: WalletFamily, network: SupportedChain): Promise<string> {
+    const { default: WDK } = await import('@tetherto/wdk');
     let wdk = new WDK(seedPhrase);
 
     if (family === 'evm' || family === 'evm_erc4337') {
+      const { default: WalletManagerEvm } = await import('@tetherto/wdk-wallet-evm');
       const rpc = getChainConfig(network).rpcUrl || getEvmFallbackRpc(network);
       wdk = wdk.registerWallet(network, WalletManagerEvm, { provider: rpc });
       const account = await wdk.getAccountByPath(network, "0'/0/0");
@@ -108,6 +107,7 @@ export class AuthService {
     }
 
     if (family === 'tron_gasfree') {
+      const { default: WalletManagerTron } = await import('@tetherto/wdk-wallet-tron');
       const rpc = getChainConfig('tron').rpcUrl || 'https://api.trongrid.io';
       wdk = wdk.registerWallet('tron', WalletManagerTron, { provider: rpc });
       const account = await wdk.getAccountByPath('tron', "0'/0/0");
@@ -118,19 +118,7 @@ export class AuthService {
       throw new Error('Bitcoin auth is currently unavailable in web runtime.');
     }
 
-    /*
-    const tonRpcUrl = process.env['TON_RPC_URL']
-      ?? process.env['TON_TESTNET_RPC_URL']
-      ?? 'https://toncenter.com/api/v2/jsonRPC';
-    const tonApiUrl = process.env['TON_API_URL'] ?? 'https://tonapi.io/v3';
-    wdk = wdk.registerWallet('ton', WalletManagerTon as any, {
-      tonClient: { url: tonRpcUrl, secretKey: process.env['TON_RPC_API_KEY'] },
-      tonApiClient: { url: tonApiUrl, secretKey: process.env['TON_API_KEY'] },
-    });
-    const account = await wdk.getAccountByPath('ton', "0'/0/0");
-    return await account.getAddress();
-    */
-    throw new Error('TON auth is temporarily disabled in production runtime.');
+    throw new Error(`${family} auth is temporarily disabled in production runtime.`);
   }
 
   private async createSessionForCreator(creator: { id: string; username: string }, family: WalletFamily, address: string) {
